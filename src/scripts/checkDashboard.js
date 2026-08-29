@@ -173,16 +173,23 @@ const main = async () => {
     : bad("activity counts wrong", JSON.stringify(rowA.activity));
 
   // ------------------------------------------------------------- totals ----
+  // Asserted as sums over the returned rows rather than against fixed numbers.
+  // A church left behind by an earlier failed run would otherwise fail these
+  // for a reason that has nothing to do with the dashboard.
   console.log("\ntotals");
   const t = dash.json.totals;
-  t.accounts === 8
-    ? ok("totals.accounts = 8 across both churches")
-    : bad(`totals.accounts was ${t.accounts}, expected 8`);
+  const rowAccounts = dash.json.data.reduce((sum, d) => sum + d.totalAccounts, 0);
+  t.accounts === rowAccounts
+    ? ok(`totals.accounts equals the sum of the rows (${t.accounts})`)
+    : bad(`totals.accounts was ${t.accounts}, rows sum to ${rowAccounts}`);
+  rowA.totalAccounts + rowB.totalAccounts === 8
+    ? ok("the two test churches contribute 8 accounts between them")
+    : bad(`test churches contribute ${rowA.totalAccounts + rowB.totalAccounts}, expected 8`);
   t.churches === dash.json.data.length
     ? ok(`totals.churches matches the row count (${t.churches})`)
     : bad("totals.churches mismatch");
-  t.unusedChurches === 2
-    ? ok("totals.unusedChurches = 2")
+  t.unusedChurches === dash.json.data.filter((d) => d.isUnused).length
+    ? ok(`totals.unusedChurches matches the flagged rows (${t.unusedChurches})`)
     : bad(`totals.unusedChurches was ${t.unusedChurches}`);
 
   // Superadmins must never be counted as anyone's church member.

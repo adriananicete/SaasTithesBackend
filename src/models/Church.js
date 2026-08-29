@@ -8,13 +8,44 @@ const churchSchema = new mongoose.Schema({
         required: true,
         trim: true,
     },
-    // Drives the Cloudinary folder (churches/<acronym>/...) and the
-    // name@<acronym>.com email convention. Uppercased on write.
+    // Display identity — "JIL" for a standalone church, "JIL-San Pedro" for a
+    // branch of an organisation. Freely editable, and may contain spaces,
+    // which is why it is NOT what names the storage folder. Not uppercased on
+    // write any more: the locality half reads as a place name, not an acronym.
     acronym: {
         type: String,
         required: true,
         unique: true,
-        uppercase: true,
+        trim: true,
+    },
+    // Names the church's Cloudinary folder (churches/<slug>/...). Generated
+    // once at creation and never changed, so renaming a church or switching
+    // its type can never strand the files already uploaded under it.
+    slug: {
+        type: String,
+        required: true,
+        unique: true,
+        lowercase: true,
+        trim: true,
+    },
+    // A standalone church stands alone; an organisation has branches in
+    // several places, so its locality is appended to the acronym to tell them
+    // apart. Editable — a church can grow into an organisation.
+    type: {
+        type: String,
+        enum: ['standalone', 'organization'],
+        default: 'standalone',
+        required: true,
+    },
+    // One field, not separate city and municipality: a Philippine locality is
+    // either a city or a municipality, never both, so two fields would leave
+    // one always blank and force the acronym logic to guess.
+    cityMunicipality: {
+        type: String,
+        trim: true,
+    },
+    province: {
+        type: String,
         trim: true,
     },
     // Convention only — the frontend prefills it on account creation. Never

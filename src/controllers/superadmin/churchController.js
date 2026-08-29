@@ -18,7 +18,10 @@ import { isValidObjectId } from "../../utils/validate.js";
 import {
   deriveAcronym,
   deriveEmailDomain,
-  uniqueAcronym,
+  buildAcronym,
+  buildSlug,
+  normalizeAcronym,
+  uniqueValue,
 } from "../../utils/acronym.js";
 import { ROLES } from "../../constants/roles.js";
 import {
@@ -40,6 +43,11 @@ const EDITABLE_FIELDS = [
   "address",
   "contactEmail",
   "contactPhone",
+  "type",
+  "cityMunicipality",
+  "province",
+  // slug is deliberately absent — it names the Cloudinary folder and is fixed
+  // for the life of the church.
 ];
 
 const getAllChurches = async (req, res, next) => {
@@ -80,8 +88,10 @@ const createChurch = async (req, res, next) => {
   let church = null;
 
   try {
-    const { name, acronym, emailDomain, address, contactEmail, contactPhone, admin } =
-      req.body;
+    const {
+      name, acronym, emailDomain, address, contactEmail, contactPhone,
+      type, cityMunicipality, province, admin,
+    } = req.body;
 
     if (!name) return res.status(400).json({ error: "Church name is required" });
     if (!admin?.name || !admin?.email)
@@ -89,34 +99,61 @@ const createChurch = async (req, res, next) => {
         .status(400)
         .json({ error: "First admin name and email are required" });
 
-    // Acronym is optional — derived from the name when omitted, so the
-    // superadmin only has to type the name. An explicit one is honoured as-is.
+    const churchType = type ?? "standalone";
+    if (!["standalone", "organization"].includes(churchType))
+      return res
+        .status(400)
+        .json({ error: "type must be 'standalone' or 'organization'" });
+
+    // An organisation's acronym is what tells its branches apart, so without a
+    // locality there is nothing to append and JIL-Malamig would collide with
+    // plain JIL.
+    if (churchType === "organization" && !cityMunicipality?.trim())
+      return res.status(400).json({
+        error: "cityMunicipality is required for an organization",
+      });
+
+    const base = deriveAcronym(name);
+    if (!base)
+      return res.status(400).json({
+        error: "Could not derive an acronym from that name — pass one explicitly.",
+      });
+
+    // Acronym is optional — built from the name and locality when omitted, so
+    // the superadmin only types those. An explicit one is honoured as-is.
     let finalAcronym;
     if (acronym) {
-      const requested = acronym.toUpperCase();
+      const requested = normalizeAcronym(acronym);
       if (await Church.exists({ acronym: requested }))
         return res
           .status(400)
           .json({ error: "A church with that acronym already exists" });
       finalAcronym = requested;
     } else {
-      const derived = deriveAcronym(name);
-      if (!derived)
-        return res.status(400).json({
-          error:
-            "Could not derive an acronym from that name — pass one explicitly.",
-        });
       // A derived clash is not the caller's fault, so it is resolved rather
       // than rejected. The result is in the response and can be changed later.
-      finalAcronym = await uniqueAcronym(derived, Church);
+      finalAcronym = await uniqueValue(
+        buildAcronym({ base, type: churchType, cityMunicipality }),
+        (candidate) => Church.exists({ acronym: candidate }),
+      );
     }
+
+    // Independent of the acronym, and fixed for the life of the church.
+    const slug = await uniqueValue(
+      buildSlug({ base, type: churchType, cityMunicipality }),
+      (candidate) => Church.exists({ slug: candidate }),
+    );
 
     church = await Church.create({
       name,
       acronym: finalAcronym,
-      // Falls out of the acronym unless one is passed explicitly, so the
-      // create form need not ask for it. Editable afterwards.
-      emailDomain: emailDomain || deriveEmailDomain(finalAcronym),
+      slug,
+      type: churchType,
+      cityMunicipality,
+      province,
+      // Uses the BASE acronym, never the locality — branches of one
+      // organisation share a domain, and "jil-san pedro.com" is not valid.
+      emailDomain: emailDomain || deriveEmailDomain(base),
       address,
       contactEmail,
       contactPhone,
@@ -193,8 +230,11 @@ const updateChurch = async (req, res, next) => {
     if (!isValidObjectId(id))
       return res.status(400).json({ error: "Invalid church id" });
 
+    const existing = await Church.findById(id);
+    if (!existing) return res.status(404).json({ error: "Church not found!" });
+
     // Whitelisted rather than passing req.body straight through, so a stray
-    // isActive/deletedAt in the payload cannot silently change state.
+    // isActive/deletedAt/slug in the payload cannot silently change state.
     const updates = {};
     for (const field of EDITABLE_FIELDS) {
       if (req.body[field] !== undefined) updates[field] = req.body[field];
@@ -202,22 +242,56 @@ const updateChurch = async (req, res, next) => {
     if (!Object.keys(updates).length)
       return res.status(400).json({ error: "No editable fields provided" });
 
+    const nextType = updates.type ?? existing.type;
+    const nextLocality =
+      updates.cityMunicipality ?? existing.cityMunicipality;
+
+    if (updates.type && !["standalone", "organization"].includes(updates.type))
+      return res
+        .status(400)
+        .json({ error: "type must be 'standalone' or 'organization'" });
+
+    if (nextType === "organization" && !nextLocality?.trim())
+      return res.status(400).json({
+        error: "cityMunicipality is required for an organization",
+      });
+
     if (updates.acronym) {
       const clash = await Church.findOne({
-        acronym: updates.acronym.toUpperCase(),
+        acronym: normalizeAcronym(updates.acronym),
         _id: { $ne: id },
       });
       if (clash)
         return res
           .status(400)
           .json({ error: "A church with that acronym already exists" });
+      updates.acronym = normalizeAcronym(updates.acronym);
+    } else if (
+      updates.type !== undefined ||
+      updates.cityMunicipality !== undefined ||
+      updates.name !== undefined
+    ) {
+      // Whatever the acronym is built from has changed and the caller did not
+      // dictate one, so rebuild it. The slug is deliberately left alone: it
+      // names the Cloudinary folder, and moving that would strand every file
+      // already uploaded under it.
+      const base = deriveAcronym(updates.name ?? existing.name);
+      const rebuilt = buildAcronym({
+        base,
+        type: nextType,
+        cityMunicipality: nextLocality,
+      });
+      if (rebuilt && rebuilt !== existing.acronym) {
+        updates.acronym = await uniqueValue(rebuilt, (candidate) =>
+          Church.exists({ acronym: candidate, _id: { $ne: id } }),
+        );
+      }
     }
 
     const church = await Church.findByIdAndUpdate(id, updates, {
       new: true,
       runValidators: true,
     });
-    if (!church) return res.status(404).json({ error: "Church not found!" });
 
     res
       .status(200)
@@ -371,12 +445,14 @@ const purgeChurch = async (req, res, next) => {
     // Uploaded files are namespaced by acronym. Non-fatal: an orphaned folder
     // is untidy, a half-purged database is not acceptable.
     try {
-      const prefix = `churches/${church.acronym}`;
+      // Keyed on slug, not acronym: the acronym may have been edited since
+      // upload, the slug never changes.
+      const prefix = `churches/${church.slug}`;
       await cloudinary.api.delete_resources_by_prefix(prefix);
       await cloudinary.api.delete_folder(prefix);
     } catch (cloudinaryError) {
       console.error(
-        `Cloudinary cleanup failed for ${church.acronym}:`,
+        `Cloudinary cleanup failed for ${church.slug}:`,
         cloudinaryError.message,
       );
     }
