@@ -2,7 +2,9 @@ import { Tithes } from "../models/TithesEntry.js";
 import { Expense } from "../models/Expense.js";
 import { sendNotification, sendNotificationToRoles } from "../utils/sendNotification.js";
 import { parseDate } from "../utils/validate.js";
+import mongoose from "mongoose";
 import { recordAudit } from "../utils/recordAudit.js";
+import { withChurch, byIdInChurch } from "../utils/tenantScope.js";
 
 // Only DO and admin can approve/reject tithes (auditor is oversight/read-only).
 const REVIEWER_ROLES = ["do", "admin"];
@@ -13,14 +15,21 @@ const TITHES_OVERSIGHT_ROLES = ["admin", "auditor", "pastor"];
 // Per-role row scoping for the tithes TABLE (the `data` array). Charts/summary
 // stay church-wide via the separate anonymized `chartData` payload, so limiting
 // rows here never hides church totals from anyone.
-//   - oversight (admin/auditor/pastor): all rows
+//   - oversight (admin/auditor/pastor): all rows IN THEIR CHURCH
 //   - do (the approver): pending queue + rows they reviewed + their own
 //   - everyone else (member/validator): their own submissions only
-const buildTithesScope = ({ role, id }) => {
-  if (TITHES_OVERSIGHT_ROLES.includes(role)) return {};
+//
+// Every branch carries the church. The oversight case used to return {} — an
+// empty filter meaning "everything", which across tenants meant every church's
+// tithes. "All rows" has always meant all rows in your own church.
+const buildTithesScope = ({ role, id, church }) => {
+  if (TITHES_OVERSIGHT_ROLES.includes(role)) return { church };
   if (role === "do")
-    return { $or: [{ status: "pending" }, { reviewedBy: id }, { submittedBy: id }] };
-  return { submittedBy: id };
+    return {
+      church,
+      $or: [{ status: "pending" }, { reviewedBy: id }, { submittedBy: id }],
+    };
+  return { church, submittedBy: id };
 };
 
 const getAllTithes = async (req, res, next) => {
@@ -47,19 +56,25 @@ const getAllTithes = async (req, res, next) => {
     // Charts/summary — church-wide but anonymized (no submitter identity, no
     // denominations). Carries no PII, so it is safe to return to every role and
     // lets members still see the church's total collections/trend.
-    const chartData = await Tithes.find(dateFilter)
+    const chartData = await Tithes.find(withChurch(dateFilter, req))
       .select("entryDate serviceType total status")
       .sort({ entryDate: 1 })
       .lean();
 
     const tithesTotalBalance = chartData.reduce((acc, item) => acc + (item.total || 0), 0);
 
+    // These two feed availableBalance, which gates how much a church may
+    // request. Unscoped they summed every church's money into one figure, so
+    // each church saw a balance that was not its own. The Expense aggregate
+    // had no $match stage at all.
+    const church = new mongoose.Types.ObjectId(req.user.church);
     const [approvedAgg, expenseAgg] = await Promise.all([
       Tithes.aggregate([
-        { $match: { status: "approved" } },
+        { $match: { church, status: "approved" } },
         { $group: { _id: null, sum: { $sum: "$total" } } },
       ]),
       Expense.aggregate([
+        { $match: { church } },
         { $group: { _id: null, sum: { $sum: "$amount" } } },
       ]),
     ]);
@@ -94,6 +109,7 @@ const submitTithes = async (req, res, next) => {
       return res.status(400).json({ error: "Tithes must be greater than 0!" });
 
     const newTithes = new Tithes({
+      church: req.user.church,
       entryDate,
       serviceType,
       denominations,
@@ -137,7 +153,7 @@ const approveTithes = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const finderTithes = await Tithes.findById(id);
+    const finderTithes = await Tithes.findOne(byIdInChurch(id, req));
     if (!finderTithes)
       return res.status(404).json({ error: "Tithes Entry not found!" });
 
@@ -158,7 +174,7 @@ const approveTithes = async (req, res, next) => {
       return res.status(400).json({ error: "Already Rejected" });
 
     const approvedTithes = await Tithes.updateOne(
-      { _id: id },
+      byIdInChurch(id, req),
       {
         $set: {
           status: "approved",
@@ -199,7 +215,7 @@ const rejectTithes = async (req, res, next) => {
     const { id } = req.params;
     const { rejectionNote } = req.body;
 
-    const findTithes = await Tithes.findById(id);
+    const findTithes = await Tithes.findOne(byIdInChurch(id, req));
     if (!findTithes)
       return res.status(404).json({ error: "Tithes Entry not Found" });
 
@@ -218,7 +234,7 @@ const rejectTithes = async (req, res, next) => {
       return res.status(404).json({ error: "Need reason for Rejection" });
 
     const rejectedTithes = await Tithes.updateOne(
-      { _id: id },
+      byIdInChurch(id, req),
       {
         $set: {
           status: "rejected",
@@ -262,7 +278,7 @@ const updateTithes = async (req, res, next) => {
     const { id } = req.params;
     const { body } = req;
 
-    const findyById = await Tithes.findById(id);
+    const findyById = await Tithes.findOne(byIdInChurch(id, req));
     if (!findyById)
       return res.status(404).json({ error: "Tithes entry not found" });
 
@@ -276,7 +292,7 @@ const updateTithes = async (req, res, next) => {
         .status(400)
         .json({ error: "Cannot edit approved/rejected entry" });
 
-    const findTithes = await Tithes.findByIdAndUpdate(id, body, {
+    const findTithes = await Tithes.findOneAndUpdate(byIdInChurch(id, req), body, {
       new: true,
       runValidators: true,
     });

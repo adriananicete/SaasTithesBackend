@@ -5,10 +5,14 @@ import { getPublicChurches } from '../../controllers/auth/churchListController.j
 
 const router = express.Router();
 
-// Throttle login attempts to slow down brute-force / credential-stuffing
+// Throttle login attempts to slow down brute-force / credential-stuffing.
+// The cap is env-overridable purely so the check suites can run back to back
+// in development — several of them sign in a dozen times and would otherwise
+// need a server restart between runs to clear the in-memory counter. Leave it
+// unset in production, where 10 is the intended limit.
 const loginLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 10,
+    max: Number(process.env.LOGIN_RATE_LIMIT_MAX) || 10,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many login attempts. Try again later.' },
