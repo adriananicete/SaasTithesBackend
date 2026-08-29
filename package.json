@@ -10,7 +10,8 @@
     "seed:superadmin": "node --env-file=.env src/scripts/seedSuperadmin.js",
     "check:superadmin": "node --env-file=.env src/scripts/checkSuperadmin.js",
     "check:dashboard": "node --env-file=.env src/scripts/checkDashboard.js",
-    "check:login": "node --env-file=.env src/scripts/checkLogin.js"
+    "check:login": "node --env-file=.env src/scripts/checkLogin.js",
+    "check:guard": "node --env-file=.env src/scripts/checkGuard.js"
   },
   "engines": {
     "node": "22.x"

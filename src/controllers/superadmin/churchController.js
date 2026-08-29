@@ -13,6 +13,7 @@ import { Comment } from "../../models/Comment.js";
 import { Notification } from "../../models/Notification.js";
 import { PushSubscription } from "../../models/PushSubscription.js";
 import cloudinary from "../../config/cloudinary.js";
+import { invalidateChurchStatus } from "../../services/churchStatus.js";
 import { isValidObjectId } from "../../utils/validate.js";
 import {
   deriveAcronym,
@@ -242,6 +243,10 @@ const setChurchActive = (isActive) => async (req, res, next) => {
     );
     if (!church) return res.status(404).json({ error: "Church not found!" });
 
+    // Takes hold on the church's very next request rather than whenever its
+    // users' access tokens happen to expire.
+    invalidateChurchStatus(id);
+
     res.status(200).json({
       status: "Success",
       message: isActive ? "Church activated" : "Church deactivated",
@@ -271,6 +276,7 @@ const softDeleteChurch = async (req, res, next) => {
 
     church.deletedAt = new Date();
     await church.save();
+    invalidateChurchStatus(id);
 
     res.status(200).json({
       status: "Success",
@@ -296,6 +302,7 @@ const restoreChurch = async (req, res, next) => {
 
     church.deletedAt = null;
     await church.save();
+    invalidateChurchStatus(id);
 
     res
       .status(200)
@@ -375,6 +382,7 @@ const purgeChurch = async (req, res, next) => {
     }
 
     await Church.findByIdAndDelete(id);
+    invalidateChurchStatus(id);
 
     res.status(200).json({
       status: "Success",
