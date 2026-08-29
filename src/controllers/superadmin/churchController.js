@@ -14,6 +14,7 @@ import { Notification } from "../../models/Notification.js";
 import { PushSubscription } from "../../models/PushSubscription.js";
 import cloudinary from "../../config/cloudinary.js";
 import { isValidObjectId } from "../../utils/validate.js";
+import { deriveAcronym, uniqueAcronym } from "../../utils/acronym.js";
 import { ROLES } from "../../constants/roles.js";
 import {
   STARTER_CATEGORIES,
@@ -77,26 +78,37 @@ const createChurch = async (req, res, next) => {
     const { name, acronym, emailDomain, address, contactEmail, contactPhone, admin } =
       req.body;
 
-    if (!name || !acronym)
-      return res
-        .status(400)
-        .json({ error: "Church name and acronym are required" });
+    if (!name) return res.status(400).json({ error: "Church name is required" });
     if (!admin?.name || !admin?.email)
       return res
         .status(400)
         .json({ error: "First admin name and email are required" });
 
-    const acronymExists = await Church.findOne({
-      acronym: acronym.toUpperCase(),
-    });
-    if (acronymExists)
-      return res
-        .status(400)
-        .json({ error: "A church with that acronym already exists" });
+    // Acronym is optional — derived from the name when omitted, so the
+    // superadmin only has to type the name. An explicit one is honoured as-is.
+    let finalAcronym;
+    if (acronym) {
+      const requested = acronym.toUpperCase();
+      if (await Church.exists({ acronym: requested }))
+        return res
+          .status(400)
+          .json({ error: "A church with that acronym already exists" });
+      finalAcronym = requested;
+    } else {
+      const derived = deriveAcronym(name);
+      if (!derived)
+        return res.status(400).json({
+          error:
+            "Could not derive an acronym from that name — pass one explicitly.",
+        });
+      // A derived clash is not the caller's fault, so it is resolved rather
+      // than rejected. The result is in the response and can be changed later.
+      finalAcronym = await uniqueAcronym(derived, Church);
+    }
 
     church = await Church.create({
       name,
-      acronym,
+      acronym: finalAcronym,
       emailDomain,
       address,
       contactEmail,

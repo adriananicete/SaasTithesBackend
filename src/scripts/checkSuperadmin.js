@@ -138,6 +138,37 @@ const main = async () => {
     ? bad("failed bootstrap left an orphan church behind")
     : ok("failed bootstrap left no orphan church");
 
+  // Acronym is derived from the name when the request omits it.
+  const derived = await call("POST", "/superadmin/churches", {
+    token: su,
+    body: { name: "Jesus is Lord", admin: { name: "JIL Admin", email: "admin@jil.test" } },
+  });
+  const jilId = derived.json?.data?.church?._id;
+  if (jilId) created.push([jilId, "Jesus is Lord"]);
+  derived.json?.data?.church?.acronym === "JIL"
+    ? ok('acronym derived from the name ("Jesus is Lord" -> JIL)')
+    : bad(`expected derived acronym JIL, got ${derived.json?.data?.church?.acronym}`);
+
+  // Two different names can derive the same acronym; that is resolved, not
+  // rejected, since the caller never asked for a specific value.
+  const clash = await call("POST", "/superadmin/churches", {
+    token: su,
+    body: { name: "Jesus in Life", admin: { name: "JIL2 Admin", email: "admin@jil2.test" } },
+  });
+  const clashId = clash.json?.data?.church?._id;
+  if (clashId) created.push([clashId, "Jesus in Life"]);
+  clash.json?.data?.church?.acronym === "JIL2"
+    ? ok("a derived acronym clash is resolved (JIL -> JIL2)")
+    : bad(`expected JIL2 on clash, got ${clash.json?.data?.church?.acronym}`);
+
+  const unnameable = await call("POST", "/superadmin/churches", {
+    token: su,
+    body: { name: "!!!", admin: { name: "x", email: "x@x.test" } },
+  });
+  unnameable.status === 400
+    ? ok("a name with no derivable acronym is rejected")
+    : bad(`expected 400 for underivable name, got ${unnameable.status}`);
+
   // Same admin email in a second church — allowed by the compound
   // { church, email } unique index.
   const beta = await call("POST", "/superadmin/churches", {
@@ -193,6 +224,11 @@ const main = async () => {
   restored.json?.data?.deletedAt === null
     ? ok("restore clears deletedAt")
     : bad("restore failed");
+
+  const restoreTwice = await call("PATCH", `/superadmin/churches/${alphaId}/restore`, { token: su });
+  restoreTwice.status === 400
+    ? ok("restoring a church that is not deleted rejected")
+    : bad(`expected 400 on second restore, got ${restoreTwice.status}`);
 
   const list = await call("GET", "/superadmin/churches", { token: su });
   list.json?.count >= 2 && Array.isArray(list.json?.data)
