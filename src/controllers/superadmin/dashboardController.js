@@ -17,6 +17,9 @@ const usersByChurchAndRole = async () => {
   const rows = await User.aggregate([
     // Superadmins have church: null and belong to no installation.
     { $match: { church: { $ne: null } } },
+    // Newest account first. $push preserves the order documents reach the
+    // group, so sorting here is what orders every `names` array.
+    { $sort: { createdAt: -1 } },
     {
       $group: {
         _id: { church: "$church", role: "$role" },
@@ -34,7 +37,7 @@ const usersByChurchAndRole = async () => {
     byChurch.get(churchId).set(row._id.role, {
       count: row.count,
       activeCount: row.activeCount,
-      names: row.names.sort((a, b) => a.localeCompare(b)),
+      names: row.names,
     });
   }
   return byChurch;

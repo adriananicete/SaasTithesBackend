@@ -95,15 +95,22 @@ const main = async () => {
     ["Dina Member", "dina@dsha.test", "member"],
   ];
   const hashed = await bcrypt.hash("TempPass123!", 10);
+  // createdAt is staggered explicitly, and timestamps disabled so the values
+  // stick: a single insertMany would otherwise stamp every document with the
+  // same millisecond, and the newest-first ordering could not be asserted.
+  const base = Date.now();
   await User.insertMany(
-    roster.map(([name, mail, role]) => ({
+    roster.map(([name, mail, role], i) => ({
       church: alphaId,
       name,
       email: mail,
       password: hashed,
       role,
       isActive: true,
+      createdAt: new Date(base + i * 1000),
+      updatedAt: new Date(base + i * 1000),
     })),
+    { timestamps: false },
   );
   ok("church A seeded with 1 admin + 6 more users; church B left with its admin only");
 
@@ -128,10 +135,12 @@ const main = async () => {
     ? ok("church A member count = 3")
     : bad(`church A member count was ${rowA.roles.member.count}`);
 
+  // Bea, Caloy then Dina were created in that order, so newest-first must
+  // return them reversed.
   const memberNames = rowA.roles.member.names;
-  const expectedMembers = ["Bea Member", "Caloy Member", "Dina Member"];
+  const expectedMembers = ["Dina Member", "Caloy Member", "Bea Member"];
   JSON.stringify(memberNames) === JSON.stringify(expectedMembers)
-    ? ok(`member names returned and sorted: ${memberNames.join(", ")}`)
+    ? ok(`member names returned newest first: ${memberNames.join(", ")}`)
     : bad(`member names wrong: ${JSON.stringify(memberNames)}`);
 
   rowA.roles.pastor.names[0] === "Pedro Pastor" && rowA.roles.auditor.names[0] === "Aldo Auditor"
