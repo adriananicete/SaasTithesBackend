@@ -7,7 +7,8 @@
     "start": "node app.js",
     "dev": "node --watch --env-file=.env app.js",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "seed:superadmin": "node --env-file=.env src/scripts/seedSuperadmin.js"
+    "seed:superadmin": "node --env-file=.env src/scripts/seedSuperadmin.js",
+    "check:superadmin": "node --env-file=.env src/scripts/checkSuperadmin.js"
   },
   "engines": {
     "node": "22.x"
