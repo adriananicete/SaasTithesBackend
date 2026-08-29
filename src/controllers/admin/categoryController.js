@@ -1,10 +1,11 @@
 import { Category } from "../../models/Category.js";
 import { isValidObjectId } from "../../utils/validate.js";
 import { recordAudit } from "../../utils/recordAudit.js";
+import { churchFilter, byIdInChurch } from "../../utils/tenantScope.js";
 
 const getAllCategories = async (req, res, next) => {
   try {
-    const getAllData = await Category.find();
+    const getAllData = await Category.find(churchFilter(req));
 
     res.status(200).json(getAllData);
   } catch (error) {
@@ -23,6 +24,7 @@ const createCategory = async (req, res, next) => {
       });
 
     const newCategory = new Category({
+      church: req.user.church,
       name,
       type,
       color,
@@ -58,8 +60,10 @@ const updateCategory = async (req, res, next) => {
       return res.status(400).json({ error: "Invalid Category ID" });
     const { name, type, color } = req.body;
 
-    const updatedCategory = await Category.findByIdAndUpdate(
-      id,
+    // Scoped by church, not just id — otherwise an id guessed from another
+    // church would be edited successfully once the admin role check passed.
+    const updatedCategory = await Category.findOneAndUpdate(
+      byIdInChurch(id, req),
       {
         name,
         type,
@@ -97,7 +101,7 @@ const deleteCategory = async (req, res, next) => {
     if (!isValidObjectId(id))
       return res.status(400).json({ error: "Invalid Category ID" });
 
-    const deletedCategory = await Category.findByIdAndDelete(id);
+    const deletedCategory = await Category.findOneAndDelete(byIdInChurch(id, req));
     if (!deletedCategory)
       return res.status(404).json({ error: "Category not found" });
 

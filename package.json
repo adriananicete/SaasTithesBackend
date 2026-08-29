@@ -14,7 +14,8 @@
     "check:guard": "node --env-file=.env src/scripts/checkGuard.js",
     "check:identity": "node --env-file=.env src/scripts/checkChurchIdentity.js",
     "check:tenant": "node --env-file=.env src/scripts/tenantLeakCheck.js",
-    "seed:churches": "node --env-file=.env src/scripts/seedTwoChurches.js"
+    "seed:churches": "node --env-file=.env src/scripts/seedTwoChurches.js",
+    "check:users": "node --env-file=.env src/scripts/checkUsers.js"
   },
   "engines": {
     "node": "22.x"

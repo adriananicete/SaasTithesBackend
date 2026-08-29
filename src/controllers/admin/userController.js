@@ -2,10 +2,12 @@ import bcrypt from "bcrypt";
 import { User } from "../../models/User.js";
 import cloudinary from "../../config/cloudinary.js";
 import { recordAudit } from "../../utils/recordAudit.js";
+import { churchFilter, byIdInChurch } from "../../utils/tenantScope.js";
+import { CHURCH_ROLES } from "../../constants/roles.js";
 
 const getAllUsers = async (req, res, next) => {
   try {
-    const allUsers = await User.find()
+    const allUsers = await User.find(churchFilter(req))
       .sort({ createdAt: -1 })
       .select("-password");
 
@@ -19,7 +21,7 @@ const getUser = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const findUserById = await User.findById(id).select("-password");
+    const findUserById = await User.findOne(byIdInChurch(id, req)).select("-password");
     if (!findUserById)
       return res.status(404).json({ error: "User not found!" });
 
@@ -42,14 +44,20 @@ const createUser = async (req, res, next) => {
     if (!name || !email || !password || !role)
       return res.status(400).json({ error: "Required all fields!" });
 
-    // check email if it already exists
-    const userExist = await User.findOne({ email });
+    // A church may not create a superadmin, or any role outside the church set.
+    if (!CHURCH_ROLES.includes(role))
+      return res.status(400).json({ error: `role must be one of: ${CHURCH_ROLES.join(", ")}` });
+
+    // Email is unique per church, not globally, so the duplicate check is too:
+    // the same address may legitimately hold an account in another church.
+    const userExist = await User.findOne({ church: req.user.church, email });
     if (userExist) return res.status(400).json({ error: "User already exist" });
 
     // hashing the password
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const newUser = new User({
+      church: req.user.church,
       name: name,
       email: email,
       password: hashedPassword,
@@ -80,13 +88,29 @@ const createUser = async (req, res, next) => {
   }
 };
 
+// Fields an admin may change on one of their own users. Whitelisted rather
+// than passing req.body through: that let an admin set ANY field, including
+// `church` — which would have moved a user into another tenant — and
+// `password`, which would have stored it unhashed.
+const USER_EDITABLE_FIELDS = ["name", "email", "role", "isActive"];
+
 const updateUser = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { body } = req;
 
-    const updatedUser = await User.findByIdAndUpdate(id, body, {
+    const updates = {};
+    for (const field of USER_EDITABLE_FIELDS) {
+      if (req.body[field] !== undefined) updates[field] = req.body[field];
+    }
+    if (!Object.keys(updates).length)
+      return res.status(400).json({ error: "No editable fields provided" });
+
+    if (updates.role && !CHURCH_ROLES.includes(updates.role))
+      return res.status(400).json({ error: `role must be one of: ${CHURCH_ROLES.join(", ")}` });
+
+    const updatedUser = await User.findOneAndUpdate(byIdInChurch(id, req), updates, {
       new: true,
+      runValidators: true,
     }).select("-password");
     if (!updatedUser) return res.status(404).json({ error: "User not found!" });
 
@@ -115,8 +139,8 @@ const isActiveUser = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const findUserByIdAndUpdate = await User.findByIdAndUpdate(
-      id,
+    const findUserByIdAndUpdate = await User.findOneAndUpdate(
+      byIdInChurch(id, req),
       { $set: { isActive: false } },
       { new: true },
     ).select("-password");
@@ -148,7 +172,7 @@ const deleteUser = async (req, res, next) => {
     try {
         const { id } = req.params;
 
-        const deletedUser  = await User.findByIdAndDelete(id);
+        const deletedUser  = await User.findOneAndDelete(byIdInChurch(id, req));
         if(!deletedUser ) return res.status(404).json({ error: "User not found!" });
 
         await recordAudit({
@@ -176,7 +200,7 @@ const setUserAvatar = async (req, res, next) => {
     if (!req.file) return res.status(400).json({ error: "No image uploaded" });
 
     const { id } = req.params;
-    const user = await User.findById(id);
+    const user = await User.findOne(byIdInChurch(id, req));
     if (!user) return res.status(404).json({ error: "User not found!" });
 
     if (user.avatarPublicId) {
@@ -206,7 +230,7 @@ const setUserAvatar = async (req, res, next) => {
 const removeUserAvatar = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const user = await User.findById(id);
+    const user = await User.findOne(byIdInChurch(id, req));
     if (!user) return res.status(404).json({ error: "User not found!" });
 
     if (user.avatarPublicId) {
