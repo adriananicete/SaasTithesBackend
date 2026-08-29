@@ -2,6 +2,11 @@ import mongoose from "mongoose";
 
 const tithesSchema = new mongoose.Schema(
   {
+    church: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Church",
+      required: true,
+    },
     entryDate: {
       type: Date,
       required: true,
@@ -50,9 +55,10 @@ const tithesSchema = new mongoose.Schema(
 );
 
 // getAllTithes filters by status + entryDate range and sorts by createdAt;
-// its balance aggregation does $match { status: "approved" } (the status
-// prefix of the compound index covers that). Reports filter entryDate.
-tithesSchema.index({ status: 1, createdAt: -1 });
-tithesSchema.index({ entryDate: 1 });
+// its balance aggregation does $match { church, status: "approved" } (the
+// church+status prefix covers that). Reports filter entryDate. Every one of
+// these is scoped to a single church, so church leads.
+tithesSchema.index({ church: 1, status: 1, createdAt: -1 });
+tithesSchema.index({ church: 1, entryDate: 1 });
 
 export const Tithes = mongoose.model("Tithes", tithesSchema);

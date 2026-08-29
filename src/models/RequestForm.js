@@ -1,11 +1,16 @@
 import mongoose from "mongoose";
 
 const requestFormSchema = new mongoose.Schema({
+  church: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Church",
+    required: true,
+  },
+  // Unique per church, not globally — each church numbers from RF-0001.
+  // See the compound index below.
   rfNo: {
     type: String,
     required: true,
-    unique: true,
-    index: true
   },
   entryDate: {
     type: Date,
@@ -94,10 +99,12 @@ const requestFormSchema = new mongoose.Schema({
 }, {timestamps: true});
 
 // getAllRequestForms filters by status, entryDate range, and requestedBy
-// (member-role scoping), sorting by createdAt. rfNo is already indexed.
-requestFormSchema.index({ status: 1, createdAt: -1 });
-requestFormSchema.index({ entryDate: 1 });
-requestFormSchema.index({ requestedBy: 1 });
+// (member-role scoping), sorting by createdAt — all within one church, so
+// church leads every index.
+requestFormSchema.index({ church: 1, rfNo: 1 }, { unique: true });
+requestFormSchema.index({ church: 1, status: 1, createdAt: -1 });
+requestFormSchema.index({ church: 1, entryDate: 1 });
+requestFormSchema.index({ church: 1, requestedBy: 1 });
 
 export const RequestForm  = mongoose.model(
   "RequestForm",

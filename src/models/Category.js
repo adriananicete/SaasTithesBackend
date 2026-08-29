@@ -1,6 +1,11 @@
 import mongoose from "mongoose";
 
 const categorySchema = new mongoose.Schema({
+    church: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Church',
+        required: true,
+    },
     name: {
         type: String,
         required: true,
@@ -22,5 +27,8 @@ const categorySchema = new mongoose.Schema({
         ref: 'User'
     },
 }, { timestamps: true});
+
+// Categories are always listed for one church, often filtered by type.
+categorySchema.index({ church: 1, type: 1 });
 
 export const Category = mongoose.model('Category', categorySchema);
