@@ -12,7 +12,9 @@
     "check:dashboard": "node --env-file=.env src/scripts/checkDashboard.js",
     "check:login": "node --env-file=.env src/scripts/checkLogin.js",
     "check:guard": "node --env-file=.env src/scripts/checkGuard.js",
-    "check:identity": "node --env-file=.env src/scripts/checkChurchIdentity.js"
+    "check:identity": "node --env-file=.env src/scripts/checkChurchIdentity.js",
+    "check:tenant": "node --env-file=.env src/scripts/tenantLeakCheck.js",
+    "seed:churches": "node --env-file=.env src/scripts/seedTwoChurches.js"
   },
   "engines": {
     "node": "22.x"
