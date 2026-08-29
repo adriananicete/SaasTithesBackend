@@ -22,6 +22,7 @@ import auditRoutes from './src/routes/auditRoutes.js';
 import pushRoutes from './src/routes/pushRoutes.js';
 import presenceRoutes from './src/routes/presenceRoutes.js';
 import superadminChurchRoutes from './src/routes/superadmin/churchRoutes.js';
+import superadminDashboardRoutes from './src/routes/superadmin/dashboardRoutes.js';
 import { setIO } from './src/services/realtime.js';
 
 const PORT = process.env.PORT || 7002;
@@ -70,6 +71,7 @@ app.use('/api/audit-log', auditRoutes);
 app.use('/api/push', pushRoutes);
 app.use('/api/presence', presenceRoutes);
 app.use('/api/superadmin/churches', superadminChurchRoutes);
+app.use('/api/superadmin/dashboard', superadminDashboardRoutes);
 
 // 404 + centralized error handling — must be last
 app.use(notFound);
