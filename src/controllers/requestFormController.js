@@ -3,6 +3,7 @@ import { RequestForm } from "../models/RequestForm.js";
 import { sendNotification, sendNotificationToRoles } from "../utils/sendNotification.js";
 import { parseDate } from "../utils/validate.js";
 import { recordAudit } from "../utils/recordAudit.js";
+import { byIdInChurch } from "../utils/tenantScope.js";
 
 const RF_POPULATE = [
   { path: "requestedBy", select: "name role avatarUrl" },
@@ -15,22 +16,36 @@ const RF_POPULATE = [
   { path: "voucherId", select: "pcfNo amount" },
 ];
 
-// Per-role row scoping for the RF table (and reused by global search):
-//   - oversight (admin/auditor/pastor): all rows
+// Per-role row scoping for the RF table, and reused by global search and by
+// the RF comment endpoints — so church-scoping it here closes all three.
+//   - oversight (admin/auditor/pastor): all rows IN THEIR CHURCH
 //   - validator: validation queue (submitted) + rows they validated + own
 //   - do: disbursement queue (voucher_created) + rows they disbursed + own
 //   - member (and any other role): their own requests only
-export const buildRfScope = ({ role, id }) => {
-  if (["admin", "auditor", "pastor"].includes(role)) return {};
+//
+// Every branch carries the church. The oversight case used to return {} — an
+// empty filter meaning "everything", which across tenants meant every church's
+// request forms. "All rows" has always meant all rows in your own church.
+export const buildRfScope = ({ role, id, church }) => {
+  if (["admin", "auditor", "pastor"].includes(role)) return { church };
   if (role === "validator")
-    return { $or: [{ status: "submitted" }, { validatedBy: id }, { requestedBy: id }] };
+    return {
+      church,
+      $or: [{ status: "submitted" }, { validatedBy: id }, { requestedBy: id }],
+    };
   if (role === "do")
-    return { $or: [{ status: "voucher_created" }, { disbursedBy: id }, { requestedBy: id }] };
-  return { requestedBy: id };
+    return {
+      church,
+      $or: [{ status: "voucher_created" }, { disbursedBy: id }, { requestedBy: id }],
+    };
+  return { church, requestedBy: id };
 };
 
-const generateRFNo = async () => {
-  const lastRF = await RequestForm.findOne().sort({ createdAt: -1 });
+// Numbering is per church — each starts at RF-0001 — so the "last" RF must be
+// the last in THIS church. Still racy (two concurrent creates can read the
+// same last row); the counter branch replaces this.
+const generateRFNo = async (church) => {
+  const lastRF = await RequestForm.findOne({ church }).sort({ createdAt: -1 });
   let newNumber = 1;
 
   if (lastRF && lastRF.rfNo) {
@@ -99,7 +114,8 @@ const createRequestForm = async (req, res, next) => {
         .json({ error: "Estimated Amount must be greater than 0" });
 
     const newRequestForm = new RequestForm({
-      rfNo: await generateRFNo(),
+      church: req.user.church,
+      rfNo: await generateRFNo(req.user.church),
       entryDate,
       category,
       estimatedAmount: amount,
@@ -136,7 +152,7 @@ const submitRequestForm = async (req, res, next) => {
     if (!mongoose.Types.ObjectId.isValid(id))
       return res.status(400).json({ error: "Invalid ID" });
 
-    const requestForm = await RequestForm.findById(id);
+    const requestForm = await RequestForm.findOne(byIdInChurch(id, req));
     if (!requestForm)
       return res.status(404).json({ error: "Request form not found" });
 
@@ -194,7 +210,7 @@ const updateRequestForm = async (req, res, next) => {
       return res.status(400).json({ error: "Invalid ID" });
     const { body } = req;
 
-    const findRequestFormById = await RequestForm.findById(id);
+    const findRequestFormById = await RequestForm.findOne(byIdInChurch(id, req));
     if (!findRequestFormById)
       return res.status(404).json({ error: "Request Form not found!" });
 
@@ -234,8 +250,8 @@ const updateRequestForm = async (req, res, next) => {
       updates.remarks = String(updates.remarks).trim();
     }
 
-    const updatedRequestForm = await RequestForm.findByIdAndUpdate(
-      id,
+    const updatedRequestForm = await RequestForm.findOneAndUpdate(
+      byIdInChurch(id, req),
       updates,
       {
         new: true,
@@ -268,7 +284,7 @@ const deleteRequestForm = async (req, res, next) => {
     if (!mongoose.Types.ObjectId.isValid(id))
       return res.status(400).json({ error: "Invalid ID" });
 
-    const findRequestFormById = await RequestForm.findById(id);
+    const findRequestFormById = await RequestForm.findOne(byIdInChurch(id, req));
     if (!findRequestFormById)
       return res.status(404).json({ error: "Request form not found!" });
 
@@ -278,7 +294,7 @@ const deleteRequestForm = async (req, res, next) => {
     if (findRequestFormById.status !== "draft")
       return res.status(400).json({ error: "Status must be draft" });
 
-    await RequestForm.findByIdAndDelete(id);
+    await RequestForm.findOneAndDelete(byIdInChurch(id, req));
 
     await recordAudit({
       req,
@@ -304,7 +320,7 @@ const validateRequestForm = async (req, res, next) => {
     if (!mongoose.Types.ObjectId.isValid(id))
       return res.status(400).json({ error: "Invalid ID" });
 
-    const findRequestFormById = await RequestForm.findById(id);
+    const findRequestFormById = await RequestForm.findOne(byIdInChurch(id, req));
     if (!findRequestFormById)
       return res.status(404).json({ error: "Request Form not found" });
 
@@ -322,8 +338,8 @@ const validateRequestForm = async (req, res, next) => {
         .status(403)
         .json({ error: "You cannot validate your own request form" });
 
-    const updatedRequestForm = await RequestForm.findByIdAndUpdate(
-      id,
+    const updatedRequestForm = await RequestForm.findOneAndUpdate(
+      byIdInChurch(id, req),
       {
         $set: {
           status: "for_approval",
@@ -376,7 +392,7 @@ const approveRequestForm = async (req, res, next) => {
     if (!mongoose.Types.ObjectId.isValid(id))
       return res.status(400).json({ error: "Invalid ID" });
 
-    const findRequestFormById = await RequestForm.findById(id);
+    const findRequestFormById = await RequestForm.findOne(byIdInChurch(id, req));
     if (!findRequestFormById)
       return res.status(404).json({ error: "Request Form not found" });
 
@@ -394,8 +410,8 @@ const approveRequestForm = async (req, res, next) => {
         .status(400)
         .json({ error: "This request form is not yet validated" });
 
-    const approvedRequestForm = await RequestForm.findByIdAndUpdate(
-      id,
+    const approvedRequestForm = await RequestForm.findOneAndUpdate(
+      byIdInChurch(id, req),
       {
         $set: {
           status: "approved",
@@ -449,7 +465,7 @@ const rejectRequestForm = async (req, res, next) => {
     if (!mongoose.Types.ObjectId.isValid(id))
       return res.status(400).json({ error: "Invalid ID" });
 
-    const findRequestFormById = await RequestForm.findById(id);
+    const findRequestFormById = await RequestForm.findOne(byIdInChurch(id, req));
     if (!findRequestFormById)
       return res.status(404).json({ error: "Request form not found" });
 
@@ -469,8 +485,8 @@ const rejectRequestForm = async (req, res, next) => {
     if (!rejectionNote)
       return res.status(400).json({ error: "Reason for Rejection" });
 
-    const rejectedRequestForm = await RequestForm.findByIdAndUpdate(
-      id,
+    const rejectedRequestForm = await RequestForm.findOneAndUpdate(
+      byIdInChurch(id, req),
       {
         $set: {
           status: "rejected",
@@ -521,7 +537,7 @@ const disburseRequestForm = async (req, res, next) => {
         .status(403)
         .json({ error: "Only admin or DO can mark as disbursed" });
 
-    const findRequestFormById = await RequestForm.findById(id);
+    const findRequestFormById = await RequestForm.findOne(byIdInChurch(id, req));
     if (!findRequestFormById)
       return res.status(404).json({ error: "Request form not found" });
 
@@ -532,8 +548,8 @@ const disburseRequestForm = async (req, res, next) => {
           error: "Voucher must be created before marking as disbursed",
         });
 
-    const disbursedRequestForm = await RequestForm.findByIdAndUpdate(
-      id,
+    const disbursedRequestForm = await RequestForm.findOneAndUpdate(
+      byIdInChurch(id, req),
       {
         $set: {
           status: "disbursed",
@@ -577,7 +593,7 @@ const receivedRequestForm = async (req, res, next) => {
     if (!mongoose.Types.ObjectId.isValid(id))
       return res.status(400).json({ error: "Bad Request" });
 
-    const findRequestFormById = await RequestForm.findById(id);
+    const findRequestFormById = await RequestForm.findOne(byIdInChurch(id, req));
     if (!findRequestFormById)
       return res.status(404).json({ error: "Request form not found" });
 
@@ -593,8 +609,8 @@ const receivedRequestForm = async (req, res, next) => {
           error: "Request form must be disbursed before confirming receipt",
         });
 
-    const receivedForm = await RequestForm.findByIdAndUpdate(
-      id,
+    const receivedForm = await RequestForm.findOneAndUpdate(
+      byIdInChurch(id, req),
       {
         $set: {
           status: "received",
