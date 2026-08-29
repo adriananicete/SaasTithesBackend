@@ -1,11 +1,16 @@
 import mongoose from "mongoose";
 
 const voucherSchema = new mongoose.Schema({
+    church: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Church',
+        required: true,
+    },
+    // Unique per church, not globally — each church numbers from PCF-0001.
+    // See the compound index below.
     pcfNo: {
         type: String,
         required: true,
-        unique: true,
-        index: true
     },
     rfId: {
         type: mongoose.Schema.Types.ObjectId,
@@ -43,5 +48,9 @@ const voucherSchema = new mongoose.Schema({
         type: String,
     }
 }, {timestamps: true})
+
+// getAllVouchers lists one church's vouchers newest-first.
+voucherSchema.index({ church: 1, pcfNo: 1 }, { unique: true });
+voucherSchema.index({ church: 1, createdAt: -1 });
 
 export const Voucher = mongoose.model('Voucher', voucherSchema);
