@@ -149,6 +149,10 @@ const main = async () => {
     ? ok('acronym derived from the name ("Jesus is Lord" -> JIL)')
     : bad(`expected derived acronym JIL, got ${derived.json?.data?.church?.acronym}`);
 
+  derived.json?.data?.church?.emailDomain === "jil.com"
+    ? ok("email domain derived from the acronym (JIL -> jil.com, lowercase)")
+    : bad(`expected jil.com, got ${derived.json?.data?.church?.emailDomain}`);
+
   // Two different names can derive the same acronym; that is resolved, not
   // rejected, since the caller never asked for a specific value.
   const clash = await call("POST", "/superadmin/churches", {

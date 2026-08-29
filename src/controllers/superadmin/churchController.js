@@ -14,7 +14,11 @@ import { Notification } from "../../models/Notification.js";
 import { PushSubscription } from "../../models/PushSubscription.js";
 import cloudinary from "../../config/cloudinary.js";
 import { isValidObjectId } from "../../utils/validate.js";
-import { deriveAcronym, uniqueAcronym } from "../../utils/acronym.js";
+import {
+  deriveAcronym,
+  deriveEmailDomain,
+  uniqueAcronym,
+} from "../../utils/acronym.js";
 import { ROLES } from "../../constants/roles.js";
 import {
   STARTER_CATEGORIES,
@@ -109,7 +113,9 @@ const createChurch = async (req, res, next) => {
     church = await Church.create({
       name,
       acronym: finalAcronym,
-      emailDomain,
+      // Falls out of the acronym unless one is passed explicitly, so the
+      // create form need not ask for it. Editable afterwards.
+      emailDomain: emailDomain || deriveEmailDomain(finalAcronym),
       address,
       contactEmail,
       contactPhone,

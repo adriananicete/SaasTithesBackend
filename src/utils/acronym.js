@@ -31,6 +31,13 @@ export const deriveAcronym = (name) => {
   return raw.toUpperCase().slice(0, MAX_LENGTH);
 };
 
+// The email convention is name@<acronym>.com, so the domain falls out of the
+// acronym: "Jesus is Lord" -> JIL -> jil.com. Derived once at creation and
+// editable afterwards, since a church may actually use .org, .ph, or a domain
+// unrelated to its acronym.
+export const deriveEmailDomain = (acronym) =>
+  acronym ? `${acronym.toLowerCase()}.com` : "";
+
 // Acronyms are unique, and two different names can easily derive the same one
 // ("Grace Baptist" and "Good Book" both give GB). Only used for derived
 // acronyms — an explicitly requested one that clashes is rejected instead, on
