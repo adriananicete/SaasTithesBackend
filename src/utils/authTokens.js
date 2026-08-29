@@ -9,13 +9,22 @@ const REFRESH_TTL = process.env.REFRESH_TOKEN_TTL || '7d';
 const refreshSecret = () =>
   process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET_KEY;
 
+// The church claim is what makes every downstream query scopeable without a
+// per-request DB lookup — verifyToken stays stateless. Superadmin has no
+// church, so it is null there and every tenant route rejects it anyway.
+const claims = (user) => ({
+  id: user._id ?? user.id,
+  role: user.role,
+  church: user.church ? String(user.church) : null,
+});
+
 export const signAccessToken = (user) =>
-  jwt.sign({ id: user._id ?? user.id, role: user.role }, process.env.JWT_SECRET_KEY, {
+  jwt.sign(claims(user), process.env.JWT_SECRET_KEY, {
     expiresIn: ACCESS_TTL,
   });
 
 export const signRefreshToken = (user) =>
-  jwt.sign({ id: user._id ?? user.id, role: user.role }, refreshSecret(), {
+  jwt.sign(claims(user), refreshSecret(), {
     expiresIn: REFRESH_TTL,
   });
 

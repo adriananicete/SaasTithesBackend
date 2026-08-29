@@ -241,8 +241,9 @@ const main = async () => {
 
   // ------------------------------------------------------- role isolation ---
   section("role isolation — a church admin must not reach superadmin routes");
+  // A church member's identity is (church, email), so the church is required.
   const adminLogin = await call("POST", "/auth/login", {
-    body: { email: "admin@chka.test", password: adminPassword },
+    body: { church: alphaId, email: "admin@chka.test", password: adminPassword },
   });
   adminLogin.status === 200
     ? ok("bootstrapped admin logs in with the generated password")

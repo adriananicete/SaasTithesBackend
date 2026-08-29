@@ -9,7 +9,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "seed:superadmin": "node --env-file=.env src/scripts/seedSuperadmin.js",
     "check:superadmin": "node --env-file=.env src/scripts/checkSuperadmin.js",
-    "check:dashboard": "node --env-file=.env src/scripts/checkDashboard.js"
+    "check:dashboard": "node --env-file=.env src/scripts/checkDashboard.js",
+    "check:login": "node --env-file=.env src/scripts/checkLogin.js"
   },
   "engines": {
     "node": "22.x"
