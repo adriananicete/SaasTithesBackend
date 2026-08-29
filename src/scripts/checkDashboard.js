@@ -68,8 +68,9 @@ const main = async () => {
   const alphaId = alpha.json?.data?.church?._id;
   if (!alphaId) { bad("could not create church A", JSON.stringify(alpha.json)); process.exit(1); }
   created.push([alphaId, "Dashboard Alpha"]);
+  // A church member's identity is (church, email), so the church is required.
   const alphaAdminToken = (await call("POST", "/auth/login", {
-    body: { email: "ana@dsha.test", password: alpha.json.data.adminPassword },
+    body: { church: alphaId, email: "ana@dsha.test", password: alpha.json.data.adminPassword },
   })).json.token;
 
   const beta = await call("POST", "/superadmin/churches", {

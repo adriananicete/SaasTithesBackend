@@ -1,6 +1,7 @@
 import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { userLogin, userLogout, refreshAccessToken, forgotPassword, resetPassword } from '../../controllers/auth/authController.js';
+import { getPublicChurches } from '../../controllers/auth/churchListController.js';
 
 const router = express.Router();
 
@@ -30,6 +31,9 @@ const resetLimiter = rateLimit({
     legacyHeaders: false,
     message: { error: 'Too many password reset attempts. Try again later.' },
 });
+
+// Church dropdown — public by necessity, it is read before anyone can log in.
+router.get('/churches', getPublicChurches);
 
 // Auth
 router.post('/login', loginLimiter, userLogin);

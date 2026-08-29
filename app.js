@@ -104,6 +104,9 @@ io.use((socket, next) => {
         const decoded = jwt.verify(token, process.env.JWT_SECRET_KEY);
         socket.userId = decoded.id;
         socket.role = decoded.role;
+        // Carried so a later branch can broadcast per church without having to
+        // enumerate every user id first.
+        socket.church = decoded.church ?? null;
         next();
     } catch (err) {
         next(new Error('Invalid token'));
