@@ -1,6 +1,6 @@
 node_modules/
 .env
 .claude/
-CLAUDE_BACKEND.md
+context/
 scripts/backups/
 test-export.js
