@@ -82,11 +82,10 @@ const main = async () => {
 
   // Church A gets a deliberately lopsided roster; B keeps only its admin.
   //
-  // Seeded straight through the model rather than POST /api/admin/users,
-  // because that endpoint cannot create anyone right now: `church` became
-  // required in the tenant-fields branch, and createUser does not stamp it
-  // until the users-and-categories scoping branch. Swap this back to the API
-  // once that lands — it is the more honest path.
+  // Still seeded through the model rather than POST /api/admin/users, but now
+  // only because the newest-first assertion below needs distinct createdAt
+  // values and a single insertMany would stamp them all with the same
+  // millisecond. The API path itself works again — checkUsers covers it.
   const roster = [
     ["Pedro Pastor", "pastor@dsha.test", "pastor"],
     ["Vina Validator", "vina@dsha.test", "validator"],
