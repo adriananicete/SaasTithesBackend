@@ -1,6 +1,7 @@
 import { Church } from "../models/Church.js";
 import cloudinary from "../config/cloudinary.js";
 import { recordAudit } from "../utils/recordAudit.js";
+import { invalidateChurchBranding } from "../services/churchBranding.js";
 
 // The tenant-facing view of a church. Everything here acts on
 // `req.user.church` and NEVER on an id from the body or the path — there is no
@@ -88,6 +89,7 @@ const setMyChurchLogo = async (req, res, next) => {
     church.logoUrl = req.file.path;
     church.logoPublicId = req.file.filename;
     await church.save();
+    invalidateChurchBranding(church._id);
 
     await recordAudit({
       req,
@@ -124,6 +126,7 @@ const removeMyChurchLogo = async (req, res, next) => {
     church.logoUrl = null;
     church.logoPublicId = null;
     await church.save();
+    invalidateChurchBranding(church._id);
 
     await recordAudit({
       req,

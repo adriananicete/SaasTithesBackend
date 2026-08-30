@@ -21,7 +21,8 @@
     "check:reports": "node --env-file=.env src/scripts/checkReports.js",
     "check:audit-search": "node --env-file=.env src/scripts/checkAuditSearchPresence.js",
     "check:numbering": "node --env-file=.env src/scripts/checkNumbering.js",
-    "check:profile": "node --env-file=.env src/scripts/checkChurchProfile.js"
+    "check:profile": "node --env-file=.env src/scripts/checkChurchProfile.js",
+    "check:branding": "node --env-file=.env src/scripts/checkExportBranding.js"
   },
   "engines": {
     "node": "22.x"
