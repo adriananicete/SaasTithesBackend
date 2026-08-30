@@ -195,9 +195,7 @@ const main = async () => {
           total: c.amounts.tithes,
         },
       }), 201);
-    // submitTithes wraps its document as data.newTithes, unlike every other
-    // create endpoint, which returns the document as data. See §14 item 10.
-    const tithesId = tithes.json?.data?.newTithes?._id;
+    const tithesId = tithes.json?.data?._id;
 
     // 2. DO approves the tithes
     step(2, "DO approves the tithes",
@@ -241,7 +239,7 @@ const main = async () => {
     step(9, "member confirms receipt",
       await call("PATCH", `/request-form/${rfId}/received`, { token: c.tokens.member }));
 
-    return { steps, rfId, tithesId, voucherNo: voucher.json?.data?.pcfNo };
+    return { steps, rfId, tithesId, voucherNo: voucher.json?.data?.pcfNo, tithesBody: tithes.json };
   };
 
   console.log("\nthe nine-step chain, both churches at once");
@@ -256,6 +254,19 @@ const main = async () => {
             `status ${s.status} (expected ${s.expect}) — ${JSON.stringify(s.json)}`);
     }
   }
+
+  // The shape of the create response, stated outright. This is how §14 item 10
+  // was found: the check read the wrong field, got undefined, passed the string
+  // "undefined" as an id, and the failure surfaced two layers away as a cast
+  // error from Mongoose. A regression should say what it is.
+  console.log("\nPOST /tithes returns the document as data (§14 item 10)");
+  typeof chainA.tithesBody?.data?._id === "string"
+    ? ok("data is the tithes document")
+    : bad("data is not the document", JSON.stringify(chainA.tithesBody?.data)?.slice(0, 120));
+  is(chainA.tithesBody?.data?.newTithes, undefined,
+    "and it is not wrapped in data.newTithes any more");
+  is(chainA.tithesBody?.data?.total, a.amounts.tithes,
+    `the document carries its own fields — total = ${a.amounts.tithes}`);
 
   // ------------------------------------------------------- the end state ----
   console.log("\nboth request forms end up received, with their own voucher");
