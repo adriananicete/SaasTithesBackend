@@ -5,6 +5,7 @@ import { parseDate } from "../utils/validate.js";
 import mongoose from "mongoose";
 import { recordAudit } from "../utils/recordAudit.js";
 import { withChurch, byIdInChurch } from "../utils/tenantScope.js";
+import { NOTIFY_TITHES_SUBMITTED } from "../constants/roles.js";
 
 // Only DO and admin can approve/reject tithes (auditor is oversight/read-only).
 const REVIEWER_ROLES = ["do", "admin"];
@@ -129,7 +130,8 @@ const submitTithes = async (req, res, next) => {
     });
 
     await sendNotificationToRoles({
-      roles: ["do", "admin"],
+      church: req.user.church,
+      roles: NOTIFY_TITHES_SUBMITTED,
       message: "A new tithes entry is awaiting approval",
       type: "info",
       refId: newTithes._id,

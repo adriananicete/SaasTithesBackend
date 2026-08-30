@@ -4,6 +4,11 @@ import { sendNotification, sendNotificationToRoles } from "../utils/sendNotifica
 import { parseDate } from "../utils/validate.js";
 import { recordAudit } from "../utils/recordAudit.js";
 import { byIdInChurch } from "../utils/tenantScope.js";
+import {
+  NOTIFY_RF_SUBMITTED,
+  NOTIFY_RF_VALIDATED,
+  NOTIFY_RF_RECEIVED,
+} from "../constants/roles.js";
 
 const RF_POPULATE = [
   { path: "requestedBy", select: "name role avatarUrl" },
@@ -185,7 +190,8 @@ const submitRequestForm = async (req, res, next) => {
     });
 
     await sendNotificationToRoles({
-      roles: ["validator", "auditor", "admin"],
+      church: req.user.church,
+      roles: NOTIFY_RF_SUBMITTED,
       message: `Request Form ${requestForm.rfNo} is awaiting validation`,
       type: "info",
       refId: requestForm._id,
@@ -368,7 +374,8 @@ const validateRequestForm = async (req, res, next) => {
     });
 
     await sendNotificationToRoles({
-      roles: ["pastor", "auditor", "admin"],
+      church: req.user.church,
+      roles: NOTIFY_RF_VALIDATED,
       message: `Request Form ${updatedRequestForm.rfNo} is awaiting approval`,
       type: "info",
       refId: updatedRequestForm._id,
@@ -631,7 +638,8 @@ const receivedRequestForm = async (req, res, next) => {
     });
 
     await sendNotificationToRoles({
-      roles: ["admin", "auditor"],
+      church: req.user.church,
+      roles: NOTIFY_RF_RECEIVED,
       message: `Request ${receivedForm.rfNo} received by ${receivedForm.requestedBy.name}. Closed.`,
       type: "info",
       refId: receivedForm._id,

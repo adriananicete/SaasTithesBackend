@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import { AuditLog } from "../models/AuditLog.js";
 import { parseDate } from "../utils/validate.js";
+import { churchFilter } from "../utils/tenantScope.js";
 
 // GET /api/audit-log — admin/auditor only (enforced by route). Read-only,
 // newest first, with optional filters + pagination.
@@ -10,7 +11,7 @@ const getAuditLog = async (req, res, next) => {
     const page = Math.max(1, Number(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
 
-    const filter = {};
+    const filter = churchFilter(req);
     if (targetModel) filter.targetModel = targetModel;
     if (action) filter.action = action;
     if (actorId && mongoose.Types.ObjectId.isValid(actorId)) filter.actorId = actorId;

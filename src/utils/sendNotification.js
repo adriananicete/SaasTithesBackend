@@ -35,13 +35,26 @@ export const sendNotification = async ({userId, message, type, refId, refModel }
     return createNotif
 };
 
-// Fan out the same notification to every active user in the given roles.
-// Pass excludeUserId to skip the actor (e.g., admin validating their own
-// submission shouldn't notify themselves through the validator-role path).
-export const sendNotificationToRoles = async ({ roles, message, type, refId, refModel, excludeUserId }) => {
+// Fan out the same notification to every active user in the given roles,
+// WITHIN ONE CHURCH. Pass excludeUserId to skip the actor (e.g., admin
+// validating their own submission shouldn't notify themselves through the
+// validator-role path).
+//
+// `church` is required. Without it this query returned every user in every
+// church holding the role, so one church approving a request notified every
+// other church's validators — a leak that no endpoint would ever show, because
+// nothing lets you read someone else's notifications. A missing church sends
+// NOTHING and says so loudly: an absent notification is recoverable, a
+// cross-church one is not.
+export const sendNotificationToRoles = async ({ church, roles, message, type, refId, refModel, excludeUserId }) => {
     if (!Array.isArray(roles) || roles.length === 0) return [];
+    if (!church) {
+        console.error(`sendNotificationToRoles skipped: no church (roles: ${roles.join(",")})`);
+        return [];
+    }
 
     const recipients = await User.find({
+        church,
         role: { $in: roles },
         isActive: true,
     }).select("_id");
