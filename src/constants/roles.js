@@ -47,6 +47,10 @@ export const RF_DISBURSE_ROLES = [ROLES.ADMIN, ROLES.DO];
 export const VOUCHER_ROLES = [ROLES.VALIDATOR, ROLES.DO, ROLES.AUDITOR, ROLES.ADMIN];
 export const VOUCHER_WRITE_ROLES = [ROLES.VALIDATOR, ROLES.ADMIN];
 
+// The full per-transaction expense ledger. The aggregated by-category view is
+// deliberately wider — every role in the church sees it (businessRequirements §7).
+export const EXPENSE_READ_ROLES = [ROLES.ADMIN, ROLES.AUDITOR];
+
 // Manual expense entry.
 export const EXPENSE_WRITE_ROLES = [ROLES.ADMIN];
 

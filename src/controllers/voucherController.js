@@ -2,16 +2,23 @@ import mongoose from "mongoose";
 import { RequestForm } from "../models/RequestForm.js";
 import { Voucher } from "../models/Voucher.js";
 import { Expense } from "../models/Expense.js";
+import { Category } from "../models/Category.js";
 import { autoRecordExpense } from "../utils/autoRecordExpense.js";
 import { sendNotification, sendNotificationToRoles } from "../utils/sendNotification.js";
 import { recordAudit } from "../utils/recordAudit.js";
+import { byIdInChurch, churchFilter } from "../utils/tenantScope.js";
+import {
+  VOUCHER_ROLES,
+  VOUCHER_WRITE_ROLES,
+  NOTIFY_VOUCHER_CHANGED,
+} from "../constants/roles.js";
 
 const getAllVouchers = async (req, res, next) => {
   try {
-    if (!["validator", "do", "auditor", "admin"].includes(req.user.role))
+    if (!VOUCHER_ROLES.includes(req.user.role))
       return res.status(403).json({ error: "Access Denied" });
 
-    const getAllVoucher = await Voucher.find()
+    const getAllVoucher = await Voucher.find(churchFilter(req))
       .sort({ createdAt: -1 })
       .populate({
         path: "rfId",
@@ -33,7 +40,7 @@ const getAllVouchers = async (req, res, next) => {
 
 const createVoucher = async (req, res, next) => {
   try {
-    if (!["validator", "admin"].includes(req.user.role))
+    if (!VOUCHER_WRITE_ROLES.includes(req.user.role))
       return res.status(403).json({ error: "Unauthorized" });
 
     const { rfId, category, amount, remarks } = req.body;
@@ -49,9 +56,17 @@ const createVoucher = async (req, res, next) => {
     if (isNaN(amountNum) || amountNum <= 0)
       return res.status(400).json({ error: "Amount must greater than zero" });
 
-    const findRequestFormbyId = await RequestForm.findById(rfId);
+    const findRequestFormbyId = await RequestForm.findOne(byIdInChurch(rfId, req));
     if (!findRequestFormbyId)
       return res.status(404).json({ error: "Request form not found" });
+
+    // The chosen category rides into the expense ledger and the reports, and
+    // getAllVouchers populates its name back out — so it has to be one of this
+    // church's own. A borrowed id would otherwise print another church's
+    // category on this church's voucher.
+    const voucherCategory = await Category.findOne(byIdInChurch(category, req));
+    if (!voucherCategory)
+      return res.status(404).json({ error: "Category not found" });
 
     if (findRequestFormbyId.status !== "approved")
       return res.status(400).json({ error: "Request form must be approved" });
@@ -69,8 +84,11 @@ const createVoucher = async (req, res, next) => {
     if (remarks !== undefined && remarks !== findRequestFormbyId.remarks)
       rfUpdates.remarks = remarks;
 
+    // Numbering is per church — each starts at PCF-0001 — so the "last"
+    // voucher must be the last in THIS church. Still racy; Branch 12 replaces
+    // this with an atomic counter. Scoping it does not make it less racy.
     const generatePCFNo = async () => {
-      const lastPCF = await Voucher.findOne().sort({ createdAt: -1 });
+      const lastPCF = await Voucher.findOne(churchFilter(req)).sort({ createdAt: -1 });
       let newNumber = 1;
 
       if (lastPCF && lastPCF.pcfNo) {
@@ -82,6 +100,7 @@ const createVoucher = async (req, res, next) => {
     };
 
     const newVoucher = new Voucher({
+      church: req.user.church,
       pcfNo: await generatePCFNo(),
       rfId: rfId,
       date: Date.now(),
@@ -94,8 +113,8 @@ const createVoucher = async (req, res, next) => {
 
     await autoRecordExpense(newVoucher);
 
-    const vouch = await RequestForm.findByIdAndUpdate(
-      rfId,
+    const vouch = await RequestForm.findOneAndUpdate(
+      byIdInChurch(rfId, req),
       {
         $set: {
           ...rfUpdates,
@@ -126,7 +145,7 @@ const createVoucher = async (req, res, next) => {
     });
 
     await sendNotificationToRoles({
-      roles: ["do", "auditor", "admin"],
+      roles: NOTIFY_VOUCHER_CHANGED,
       message: `Voucher ${newVoucher.pcfNo} created for ${vouch.rfNo}`,
       type: "info",
       refId: newVoucher._id,
@@ -150,10 +169,10 @@ const cancelVoucher = async (req, res, next) => {
     if (!mongoose.Types.ObjectId.isValid(id))
       return res.status(400).json({ error: "Invalid ID" });
 
-    if (!["validator", "admin"].includes(req.user.role))
+    if (!VOUCHER_WRITE_ROLES.includes(req.user.role))
       return res.status(403).json({ error: "Unauthorized" });
 
-    const voucher = await Voucher.findById(id);
+    const voucher = await Voucher.findOne(byIdInChurch(id, req));
     if (!voucher)
       return res.status(404).json({ error: "Voucher not found" });
 
@@ -169,7 +188,7 @@ const cancelVoucher = async (req, res, next) => {
     if (voucher.status === "cancelled")
       return res.status(400).json({ error: "Voucher is already cancelled" });
 
-    const requestForm = await RequestForm.findById(voucher.rfId);
+    const requestForm = await RequestForm.findOne(byIdInChurch(voucher.rfId, req));
     if (!requestForm)
       return res.status(404).json({ error: "Linked request form not found" });
 
@@ -184,7 +203,11 @@ const cancelVoucher = async (req, res, next) => {
 
     // Reverse the auto-recorded expense so reports don't count a cancelled
     // voucher. Matches the record created by autoRecordExpense on creation.
-    await Expense.deleteOne({ source: "voucher", linkedId: voucher._id });
+    await Expense.deleteOne({
+      church: req.user.church,
+      source: "voucher",
+      linkedId: voucher._id,
+    });
 
     voucher.status = "cancelled";
     voucher.cancelledBy = req.user.id;
@@ -193,8 +216,8 @@ const cancelVoucher = async (req, res, next) => {
     await voucher.save();
 
     // Reopen the RF back to approved so a new voucher can be created for it.
-    const reopenedRf = await RequestForm.findByIdAndUpdate(
-      voucher.rfId,
+    const reopenedRf = await RequestForm.findOneAndUpdate(
+      byIdInChurch(voucher.rfId, req),
       {
         $set: { status: "approved" },
         $unset: { voucherId: "", voucherCreatedAt: "" },
@@ -221,7 +244,7 @@ const cancelVoucher = async (req, res, next) => {
     });
 
     await sendNotificationToRoles({
-      roles: ["do", "auditor", "admin"],
+      roles: NOTIFY_VOUCHER_CHANGED,
       message: `Voucher ${voucher.pcfNo} was cancelled and ${reopenedRf.rfNo} reopened`,
       type: "info",
       refId: reopenedRf._id,
