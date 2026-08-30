@@ -19,6 +19,7 @@
 import mongoose from "mongoose";
 import { connectDB } from "../config/db.js";
 import { seedTwoChurches, MARKERS } from "./lib/seedChurches.js";
+import { xlsxText, pdfVisibleText } from "./lib/exportScan.js";
 
 const BASE = process.env.CHECK_BASE_URL || "http://localhost:7001/api";
 
@@ -26,12 +27,18 @@ const results = [];
 const record = (area, name, leaked, detail) =>
   results.push({ area, name, leaked, detail });
 
-// Some endpoints cannot be judged by scanning their body — an .xlsx is a ZIP,
-// so its text is compressed and a marker search would report "clean" whether
-// or not a row leaked. Recorded as unknown rather than passing: a false green
-// in a security gate is worse than an absent row.
+// Exports used to be recorded as unverifiable — an .xlsx is a ZIP and a PDF
+// compresses its text, so a marker search over the raw bytes reports "clean"
+// whether or not a row leaked, and a false green in a security gate is worse
+// than an absent row. `lib/exportScan.js` parses both formats instead, so the
+// printed documents are now measured like everything else.
 const recordUnverifiable = (area, name, why) =>
   results.push({ area, name, leaked: null, unverifiable: why });
+
+const download = async (path, token) => {
+  const res = await fetch(BASE + path, { headers: { Authorization: `Bearer ${token}` } });
+  return { status: res.status, buf: Buffer.from(await res.arrayBuffer()) };
+};
 
 const call = async (method, path, { token, body } = {}) => {
   const res = await fetch(BASE + path, {
@@ -172,11 +179,37 @@ const main = async () => {
     ["users", "DELETE", `/admin/users/${b.users[1]._id}`, null],
   ];
 
-  // Exports share fetchTithes/fetchExpenses with the JSON report endpoints
-  // above, so scoping those scopes these — but that has to be reasoned, not
-  // measured, because the payload is a compressed archive.
-  for (const spec of ["GET /reports/tithes/export/excel", "GET /reports/expense/export/excel"]) {
-    recordUnverifiable("exports", spec, "xlsx is compressed — follows the report endpoints above");
+  // ---------------------------------------------------------- exports -----
+  // The printed documents, read rather than reasoned about. A marker reaching
+  // a signed financial record is the worst version of this whole class of bug.
+  for (const [path, kind] of [
+    ["/reports/tithes/export/excel", "xlsx"],
+    ["/reports/tithes/export/pdf", "pdf"],
+    ["/reports/expense/export/excel", "xlsx"],
+    ["/reports/expense/export/pdf", "pdf"],
+    ["/reports/combined/export/excel", "xlsx"],
+    ["/reports/combined/export/pdf", "pdf"],
+  ]) {
+    const spec = `GET ${path}`;
+    const file = await download(path, tokenA);
+    if (file.status !== 200) {
+      record("exports", spec, `could not download — status ${file.status}`, `status ${file.status}`);
+      continue;
+    }
+    let text = "";
+    try {
+      text = kind === "xlsx" ? await xlsxText(file.buf) : pdfVisibleText(file.buf);
+    } catch (error) {
+      recordUnverifiable("exports", spec, `could not parse the file: ${error.message}`);
+      continue;
+    }
+    // An unreadable file cannot be called clean — that is the false green the
+    // old "unverifiable" row existed to avoid.
+    if (!text.length) {
+      recordUnverifiable("exports", spec, "no text could be read out of the file");
+      continue;
+    }
+    record("exports", spec, findLeak(text), `${file.buf.length} bytes, ${text.length} chars read`);
   }
 
   for (const [area, method, path, body] of writes) {
