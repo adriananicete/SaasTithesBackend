@@ -13,7 +13,13 @@ const tithesSchema = new mongoose.Schema(
     },
     serviceType: {
       type: String,
-      enum: ["Sunday Service", "Special Service", "Anniversay Service"],
+      // "Anniversay" was a typo carried in the schema, and therefore in the
+      // data, since the original single-church build. Corrected here because
+      // this database has no rows to strand — both clusters are empty and no
+      // church is onboarded. Any database that DOES hold the old spelling must
+      // be run through scripts/migrateServiceTypeSpelling.js first, or those
+      // rows fail validation on their next save.
+      enum: ["Sunday Service", "Special Service", "Anniversary Service"],
       required: true,
     },
     denominations: [

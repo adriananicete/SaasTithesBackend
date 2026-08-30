@@ -17,11 +17,17 @@ import { Tithes } from "../models/TithesEntry.js";
 import { Expense } from "../models/Expense.js";
 import { Category } from "../models/Category.js";
 import { RequestForm } from "../models/RequestForm.js";
+import {
+  migrateServiceTypeSpelling,
+  OLD_SERVICE_TYPE,
+  NEW_SERVICE_TYPE,
+} from "./migrateServiceTypeSpelling.js";
 
 const BASE = process.env.CHECK_BASE_URL || "http://localhost:7001/api";
 
 let passed = 0;
 let failed = 0;
+let baselineChurches = null;
 const created = [];
 
 const ok = (msg) => { console.log(`  ✓  ${msg}`); passed++; };
@@ -29,6 +35,8 @@ const bad = (msg, detail) => {
   console.log(`  ✗  ${msg}${detail ? `\n       ${detail}` : ""}`);
   failed++;
 };
+const is = (actual, expect, msg) =>
+  actual === expect ? ok(msg) : bad(msg, `got ${actual}, expected ${expect}`);
 
 const call = async (method, path, { token, body } = {}) => {
   const res = await fetch(BASE + path, {
@@ -66,6 +74,9 @@ const main = async () => {
     console.error("If this says too many attempts, restart the server — the rate limiter is in memory.");
     process.exit(1);
   }
+
+  const before = await call("GET", "/superadmin/churches", { token: su });
+  baselineChurches = before.json?.count ?? 0;
 
   // Deliberately different amounts, so a pooled figure is a wrong number.
   const build = async (name, slugHint, { approved, pending, expense }) => {
@@ -192,6 +203,54 @@ const main = async () => {
     ? ok("both churches have their own RF-0001 — numbering is per church")
     : bad(`A: ${aRfNos.join(",")} · B: ${bRfNos.join(",")}`);
 
+  // ------------------------------------------------ the serviceType typo ----
+  // §14 item 6. Runs last because it adds rows, and the balance assertions
+  // above are exact.
+  console.log("\nthe Anniversary spelling is corrected (§14 item 6)");
+  const submit = (serviceType) =>
+    call("POST", "/tithes", {
+      token: a.token,
+      body: {
+        entryDate: new Date(), serviceType,
+        denominations: [{ bill: 100, qty: 1, subtotal: 100 }], total: 100,
+      },
+    });
+
+  const correct = await submit(NEW_SERVICE_TYPE);
+  is(correct.status, 201, `"${NEW_SERVICE_TYPE}" is accepted`);
+
+  const typo = await submit(OLD_SERVICE_TYPE);
+  is(typo.status, 400, `"${OLD_SERVICE_TYPE}" is refused — the typo is out of the enum`);
+
+  // The migration only ever runs once, against real data, so the empty-database
+  // path this repo has proves nothing. Plant a row carrying the old spelling —
+  // through the driver, since the model would now reject it — and migrate it.
+  console.log("\nthe migration moves a row that carries the old spelling");
+  const planted = await Tithes.collection.insertOne({
+    church: new mongoose.Types.ObjectId(a.churchId),
+    entryDate: new Date(),
+    serviceType: OLD_SERVICE_TYPE,
+    total: 250,
+    status: "pending",
+    submittedBy: new mongoose.Types.ObjectId(a.member._id),
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+  is(await Tithes.countDocuments({ serviceType: OLD_SERVICE_TYPE }), 1,
+    "a row with the old spelling exists");
+
+  const result = await migrateServiceTypeSpelling();
+  is(result.before, 1, "the migration found it");
+  is(result.modified, 1, "and updated it");
+  is(result.remaining, 0, "leaving none behind");
+
+  const moved = await Tithes.findById(planted.insertedId);
+  is(moved?.serviceType, NEW_SERVICE_TYPE, "the row now carries the correct spelling");
+
+  // Idempotent: a second run must be a no-op, not an error.
+  const second = await migrateServiceTypeSpelling();
+  is(second.before, 0, "a second run finds nothing to do");
+
   return su;
 };
 
@@ -209,9 +268,10 @@ try {
       if (id) await call("DELETE", `/superadmin/churches/${id}/purge`, { token, body: { confirmName: name } });
     }
     const left = await call("GET", "/superadmin/churches", { token });
-    left.json?.count === 0
-      ? ok("test data cleaned up (0 churches remain)")
-      : bad(`${left.json?.count ?? "?"} churches left behind — check manually`);
+    const expected = baselineChurches ?? 0;
+    left.json?.count === expected
+      ? ok(`test data cleaned up (${expected} church(es) remain, as before the run)`)
+      : bad(`${left.json?.count ?? "?"} churches remain, expected ${expected} — check manually`);
   }
   if (mongoose.connection.readyState) await mongoose.disconnect();
 }
