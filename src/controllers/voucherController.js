@@ -97,7 +97,33 @@ const createVoucher = async (req, res, next) => {
     });
     await newVoucher.save();
 
-    await autoRecordExpense(newVoucher);
+    // The voucher and its expense are one act. If the expense cannot be
+    // written, undo the voucher rather than leave a disbursement that the
+    // ledger does not know about — an unrecorded expense overstates
+    // availableBalance, so the next request form gets approved against money
+    // that is already gone.
+    //
+    // A compensating delete rather than a transaction: Atlas would support one,
+    // but the codebase has no transaction anywhere yet and cancelVoucher
+    // already reverses this exact pair the same way.
+    try {
+      await autoRecordExpense(newVoucher);
+    } catch (error) {
+      console.error(`autoRecordExpense failed for ${newVoucher.pcfNo}:`, error?.message);
+      try {
+        await Voucher.deleteOne({ _id: newVoucher._id });
+      } catch (rollbackError) {
+        // The worst case, and the one that must never be quiet: the voucher
+        // survives with no expense behind it.
+        console.error(
+          `ROLLBACK FAILED — voucher ${newVoucher.pcfNo} exists with no expense row:`,
+          rollbackError?.message,
+        );
+      }
+      return res.status(500).json({
+        error: "Could not record the expense for this voucher. Nothing was saved — please try again.",
+      });
+    }
 
     const vouch = await RequestForm.findOneAndUpdate(
       byIdInChurch(rfId, req),

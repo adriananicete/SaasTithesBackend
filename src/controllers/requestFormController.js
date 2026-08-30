@@ -5,6 +5,7 @@ import { parseDate } from "../utils/validate.js";
 import { recordAudit } from "../utils/recordAudit.js";
 import { byIdInChurch } from "../utils/tenantScope.js";
 import { nextNumber } from "../utils/sequence.js";
+import { getAvailableBalance, peso } from "../utils/balance.js";
 import {
   NOTIFY_RF_SUBMITTED,
   NOTIFY_RF_VALIDATED,
@@ -103,6 +104,25 @@ const createRequestForm = async (req, res, next) => {
       return res
         .status(400)
         .json({ error: "Estimated Amount must be greater than 0" });
+
+    // A request may not exceed the church's cash on hand. This existed only in
+    // the UI, so a direct API call could ask for more than the church holds —
+    // and the request would travel the whole pipeline before anyone noticed
+    // (businessRequirements §14 item 2). Wording matches the client's exactly,
+    // so the two never disagree in front of a user.
+    //
+    // Deliberately NOT applied to updateRequestForm: editing a draft is free by
+    // design, and validators catch an over-balance edit at review time (§5.4).
+    const available = await getAvailableBalance(req.user.church);
+    if (available <= 0)
+      return res.status(400).json({
+        error:
+          "The church has no available tithes balance — no requests can be made right now",
+      });
+    if (amount > available)
+      return res.status(400).json({
+        error: `Amount exceeds available tithes balance (${peso(available)})`,
+      });
 
     const newRequestForm = new RequestForm({
       church: req.user.church,

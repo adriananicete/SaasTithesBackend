@@ -1,10 +1,10 @@
 import { Tithes } from "../models/TithesEntry.js";
-import { Expense } from "../models/Expense.js";
 import { sendNotification, sendNotificationToRoles } from "../utils/sendNotification.js";
 import { parseDate } from "../utils/validate.js";
 import mongoose from "mongoose";
 import { recordAudit } from "../utils/recordAudit.js";
 import { withChurch, byIdInChurch } from "../utils/tenantScope.js";
+import { getAvailableBalance } from "../utils/balance.js";
 import { NOTIFY_TITHES_SUBMITTED } from "../constants/roles.js";
 
 // Only DO and admin can approve/reject tithes (auditor is oversight/read-only).
@@ -64,25 +64,11 @@ const getAllTithes = async (req, res, next) => {
 
     const tithesTotalBalance = chartData.reduce((acc, item) => acc + (item.total || 0), 0);
 
-    // These two feed availableBalance, which gates how much a church may
-    // request. Unscoped they summed every church's money into one figure, so
-    // each church saw a balance that was not its own. The Expense aggregate
-    // had no $match stage at all.
-    const church = new mongoose.Types.ObjectId(req.user.church);
-    const [approvedAgg, expenseAgg] = await Promise.all([
-      Tithes.aggregate([
-        { $match: { church, status: "approved" } },
-        { $group: { _id: null, sum: { $sum: "$total" } } },
-      ]),
-      Expense.aggregate([
-        { $match: { church } },
-        { $group: { _id: null, sum: { $sum: "$amount" } } },
-      ]),
-    ]);
-
-    const totalApproved = approvedAgg[0]?.sum ?? 0;
-    const totalExpenses = expenseAgg[0]?.sum ?? 0;
-    const availableBalance = totalApproved - totalExpenses;
+    // availableBalance gates how much a church may request, and since the RF
+    // create handler enforces that cap it has to be the SAME number here — so
+    // both read one definition in utils/balance.js rather than each keeping
+    // their own aggregation to drift apart.
+    const availableBalance = await getAvailableBalance(req.user.church);
 
     res.status(200).json({
       status: "Success",
