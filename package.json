@@ -26,7 +26,8 @@
     "check:branding": "node --env-file=.env src/scripts/checkExportBranding.js",
     "check:chain": "node --env-file=.env src/scripts/checkFullChain.js",
     "check:money": "node --env-file=.env src/scripts/checkMoneyIntegrity.js",
-    "check:backlog": "node --env-file=.env src/scripts/checkBacklog.js"
+    "check:backlog": "node --env-file=.env src/scripts/checkBacklog.js",
+    "check:purge": "node --env-file=.env src/scripts/checkPurge.js"
   },
   "engines": {
     "node": "22.x"

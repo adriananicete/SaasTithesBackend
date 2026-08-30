@@ -403,12 +403,47 @@ const purgeChurch = async (req, res, next) => {
       return res.status(400).json({ error: "Invalid church id" });
 
     const church = await Church.findById(id);
-    if (!church) return res.status(404).json({ error: "Church not found!" });
 
-    if (confirmName !== church.name)
+    // No Church document means a previous purge got part-way and stopped. That
+    // is the resumable case: re-running finishes it. There is nothing left to
+    // confirm the name against, and with the church already gone the only rows
+    // this can reach are orphans — no live tenant can be touched by it.
+    const resuming = !church;
+
+    if (!resuming && confirmName !== church.name)
       return res.status(400).json({
         error: `Type the church name exactly to confirm. Expected "${church.name}".`,
       });
+
+    const name = church?.name ?? "(already removed)";
+    const slug = church?.slug ?? null;
+
+    // The order matters, and it is the whole point of this handler.
+    //
+    // These deletes used to run as one Promise.all with the Church document
+    // removed LAST. A burst that failed part-way left some collections emptied
+    // and others not — while the church itself survived, still listed, still
+    // usable, quietly missing data. That is the one outcome worth designing
+    // against: a working church with holes in it.
+    //
+    // So the church is made unusable and removed FIRST. If everything after
+    // this fails, what remains is rows belonging to a church that no longer
+    // exists — unreachable, because every tenant query filters on a church id
+    // that now matches nothing. Inert, and swept by running this again.
+    //
+    // Deliberately not a transaction: there is none anywhere in this codebase,
+    // and a purge is exactly the shape that would strain one — a large church
+    // can exceed the 16MB oplog entry limit, and a transaction that fails on
+    // the biggest customer is worse than leaving inert rows behind.
+    if (!resuming) {
+      await Church.findByIdAndUpdate(id, {
+        $set: { isActive: false, deletedAt: new Date() },
+      });
+      invalidateChurchStatus(id);
+      invalidateChurchBranding(id);
+
+      await Church.findByIdAndDelete(id);
+    }
 
     // Comment, Notification and PushSubscription carry no church field — they
     // hang off a user or an RF, so their ids have to be gathered first.
@@ -417,66 +452,78 @@ const purgeChurch = async (req, res, next) => {
       RequestForm.find({ church: id }).distinct("_id"),
     ]);
 
-    const labels = [
-      "tithes",
-      "requestForms",
-      "vouchers",
-      "expenses",
-      "categories",
-      "auditLogs",
-      "counters",
-      "comments",
-      "notifications",
-      "pushSubscriptions",
-      "users",
+    const sweeps = [
+      ["tithes", () => Tithes.deleteMany({ church: id })],
+      ["requestForms", () => RequestForm.deleteMany({ church: id })],
+      ["vouchers", () => Voucher.deleteMany({ church: id })],
+      ["expenses", () => Expense.deleteMany({ church: id })],
+      ["categories", () => Category.deleteMany({ church: id })],
+      ["auditLogs", () => AuditLog.deleteMany({ church: id })],
+      ["counters", () => Counter.deleteMany({ church: id })],
+      ["comments", () => Comment.deleteMany({ refId: { $in: rfIds } })],
+      ["notifications", () => Notification.deleteMany({ userId: { $in: userIds } })],
+      ["pushSubscriptions", () => PushSubscription.deleteMany({ userId: { $in: userIds } })],
+      ["users", () => User.deleteMany({ church: id })],
     ];
 
-    const results = await Promise.all([
-      Tithes.deleteMany({ church: id }),
-      RequestForm.deleteMany({ church: id }),
-      Voucher.deleteMany({ church: id }),
-      Expense.deleteMany({ church: id }),
-      Category.deleteMany({ church: id }),
-      AuditLog.deleteMany({ church: id }),
-      Counter.deleteMany({ church: id }),
-      Comment.deleteMany({ refId: { $in: rfIds } }),
-      Notification.deleteMany({ userId: { $in: userIds } }),
-      PushSubscription.deleteMany({ userId: { $in: userIds } }),
-      User.deleteMany({ church: id }),
-    ]);
-
-    const deleted = Object.fromEntries(
-      labels.map((key, i) => [key, results[i].deletedCount]),
-    );
-
-    // Uploaded files are namespaced by slug — keyed on the slug and not the
-    // acronym, because the acronym may have been edited since upload while the
-    // slug never changes. Non-fatal: an orphaned folder is untidy, a
-    // half-purged database is not acceptable.
-    try {
-      const prefix = `churches/${church.slug}`;
-      await cloudinary.api.delete_resources_by_prefix(prefix);
-      await cloudinary.api.delete_folder(prefix);
-    } catch (cloudinaryError) {
-      // A church that uploaded nothing has no folder, and deleting nothing is
-      // not a failure. This 404 was being reported as an error on almost every
-      // purge, which is how it came to fill the log.
-      const httpCode = cloudinaryError?.error?.http_code ?? cloudinaryError?.http_code;
-      if (httpCode !== 404) {
-        console.error(
-          `Cloudinary cleanup failed for ${church.slug} — ${cloudinaryErrorText(cloudinaryError)}`,
-        );
+    // Sequential, so a failure stops at a known point and the response can say
+    // exactly how far it got.
+    const deleted = {};
+    for (const [label, run] of sweeps) {
+      try {
+        const result = await run();
+        deleted[label] = result.deletedCount;
+      } catch (sweepError) {
+        console.error(`purge of ${name} stopped at ${label}:`, sweepError?.message);
+        return res.status(500).json({
+          error:
+            `The church record is gone, but the sweep stopped at "${label}". ` +
+            `Nothing is reachable any more — run the purge again to finish it.`,
+          data: {
+            deleted,
+            stoppedAt: label,
+            remaining: sweeps.slice(sweeps.findIndex(([l]) => l === label)).map(([l]) => l),
+          },
+        });
       }
     }
 
-    await Church.findByIdAndDelete(id);
-    invalidateChurchStatus(id);
-    invalidateChurchBranding(id);
+    // Uploaded files are namespaced by the slug, not the acronym — the acronym
+    // may have been edited since upload while the slug never changes. Skipped
+    // when resuming, because the Church document that carried the slug is
+    // already gone. Non-fatal either way: an orphaned folder is untidy, a
+    // half-purged database is not.
+    if (slug) {
+      try {
+        const prefix = `churches/${slug}`;
+        await cloudinary.api.delete_resources_by_prefix(prefix);
+        await cloudinary.api.delete_folder(prefix);
+      } catch (cloudinaryError) {
+        // A church that uploaded nothing has no folder, and deleting nothing is
+        // not a failure. This 404 was being reported as an error on almost every
+        // purge, which is how it came to fill the log.
+        const httpCode = cloudinaryError?.error?.http_code ?? cloudinaryError?.http_code;
+        if (httpCode !== 404) {
+          console.error(
+            `Cloudinary cleanup failed for ${slug} — ${cloudinaryErrorText(cloudinaryError)}`,
+          );
+        }
+      }
+    }
+
+    const swept = Object.values(deleted).reduce((a, b) => a + b, 0);
+
+    // A resumed purge that found nothing means the id was never a church, or it
+    // was already finished. Say so rather than reporting a successful purge.
+    if (resuming && swept === 0)
+      return res.status(404).json({ error: "Church not found!" });
 
     res.status(200).json({
       status: "Success",
-      message: `Church "${church.name}" purged permanently`,
-      data: { deleted },
+      message: resuming
+        ? `Resumed purge finished — ${swept} leftover record(s) removed`
+        : `Church "${name}" purged permanently`,
+      data: { deleted, resumed: resuming },
     });
   } catch (error) {
     next(error);
