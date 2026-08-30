@@ -135,7 +135,7 @@ const createVoucher = async (req, res, next) => {
           voucherCreatedAt: Date.now(),
         },
       },
-      { new: true, runValidators: true }
+      { returnDocument: "after", runValidators: true }
     );
 
     await recordAudit({
@@ -235,7 +235,7 @@ const cancelVoucher = async (req, res, next) => {
         $set: { status: "approved" },
         $unset: { voucherId: "", voucherCreatedAt: "" },
       },
-      { new: true, runValidators: true }
+      { returnDocument: "after", runValidators: true }
     );
 
     await recordAudit({

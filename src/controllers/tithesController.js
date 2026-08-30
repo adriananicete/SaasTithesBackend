@@ -163,16 +163,13 @@ const approveTithes = async (req, res, next) => {
     if (finderTithes.status === "rejected")
       return res.status(400).json({ error: "Already Rejected" });
 
-    const approvedTithes = await Tithes.updateOne(
-      byIdInChurch(id, req),
-      {
-        $set: {
-          status: "approved",
-          reviewedBy: req.user.id,
-          reviewedAt: Date.now(),
-        },
+    await Tithes.updateOne(byIdInChurch(id, req), {
+      $set: {
+        status: "approved",
+        reviewedBy: req.user.id,
+        reviewedAt: Date.now(),
       },
-    );
+    });
 
     await recordAudit({
       req,
@@ -225,18 +222,16 @@ const rejectTithes = async (req, res, next) => {
     if (!rejectionNote)
       return res.status(404).json({ error: "Need reason for Rejection" });
 
-    const rejectedTithes = await Tithes.updateOne(
-      byIdInChurch(id, req),
-      {
-        $set: {
-          status: "rejected",
-          reviewedBy: req.user.id,
-          reviewedAt: Date.now(),
-          rejectionNote: rejectionNote,
-        },
+    // updateOne returns a write result, not the document — there is nothing to
+    // read back and no `new`/`returnDocument` option that would apply.
+    await Tithes.updateOne(byIdInChurch(id, req), {
+      $set: {
+        status: "rejected",
+        reviewedBy: req.user.id,
+        reviewedAt: Date.now(),
+        rejectionNote: rejectionNote,
       },
-      { new: true },
-    );
+    });
 
     await recordAudit({
       req,
@@ -287,7 +282,7 @@ const updateTithes = async (req, res, next) => {
         .json({ error: "Cannot edit approved/rejected entry" });
 
     const findTithes = await Tithes.findOneAndUpdate(byIdInChurch(id, req), body, {
-      new: true,
+      returnDocument: "after",
       runValidators: true,
     });
 

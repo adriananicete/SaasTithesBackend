@@ -22,9 +22,9 @@ export const nextNumber = async (church, key, prefix) => {
     Counter.findOneAndUpdate(
       { church, key },
       { $inc: { seq: 1 } },
-      // returnDocument rather than `new: true`: Mongoose 9 deprecates the
-      // latter and warns on every call. The repo's other 18 findOneAndUpdate
-      // sites still use it and warn today — a separate sweep, not this branch.
+      // returnDocument rather than `new: true`, which Mongoose 9 deprecates
+      // and warns on. This file went first; the rest of the repo followed in
+      // chore/mongoose-returndocument-sweep.
       { upsert: true, returnDocument: "after", setDefaultsOnInsert: true },
     );
 

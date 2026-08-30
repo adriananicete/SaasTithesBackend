@@ -266,7 +266,7 @@ const updateRequestForm = async (req, res, next) => {
       byIdInChurch(id, req),
       updates,
       {
-        new: true,
+        returnDocument: "after",
         runValidators: true,
       },
     );
@@ -359,7 +359,7 @@ const validateRequestForm = async (req, res, next) => {
           validatedAt: Date.now(),
         },
       },
-      { new: true, runValidators: true },
+      { returnDocument: "after", runValidators: true },
     ).populate(RF_POPULATE);
 
     await recordAudit({
@@ -432,7 +432,7 @@ const approveRequestForm = async (req, res, next) => {
           approvedAt: Date.now(),
         },
       },
-      { new: true, runValidators: true },
+      { returnDocument: "after", runValidators: true },
     ).populate(RF_POPULATE);
 
     await recordAudit({
@@ -508,7 +508,7 @@ const rejectRequestForm = async (req, res, next) => {
           rejectedAt: Date.now(),
         },
       },
-      { new: true, runValidators: true },
+      { returnDocument: "after", runValidators: true },
     ).populate(RF_POPULATE);
 
     await recordAudit({
@@ -570,7 +570,7 @@ const disburseRequestForm = async (req, res, next) => {
           disbursedAt: Date.now(),
         },
       },
-      { new: true, runValidators: true },
+      { returnDocument: "after", runValidators: true },
     ).populate(RF_POPULATE);
 
     await recordAudit({
@@ -631,7 +631,7 @@ const receivedRequestForm = async (req, res, next) => {
           receivedAt: Date.now(),
         },
       },
-      { new: true, runValidators: true },
+      { returnDocument: "after", runValidators: true },
     ).populate(RF_POPULATE);
 
     await recordAudit({

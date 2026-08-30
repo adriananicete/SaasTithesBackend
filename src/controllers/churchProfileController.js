@@ -48,7 +48,7 @@ const updateMyChurchProfile = async (req, res, next) => {
       });
 
     const church = await Church.findByIdAndUpdate(req.user.church, updates, {
-      new: true,
+      returnDocument: "after",
       runValidators: true,
     }).select(PROFILE_FIELDS);
     if (!church) return res.status(404).json({ error: "Church not found" });

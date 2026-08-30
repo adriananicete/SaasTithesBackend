@@ -109,7 +109,7 @@ const updateUser = async (req, res, next) => {
       return res.status(400).json({ error: `role must be one of: ${CHURCH_ROLES.join(", ")}` });
 
     const updatedUser = await User.findOneAndUpdate(byIdInChurch(id, req), updates, {
-      new: true,
+      returnDocument: "after",
       runValidators: true,
     }).select("-password");
     if (!updatedUser) return res.status(404).json({ error: "User not found!" });
@@ -142,7 +142,7 @@ const isActiveUser = async (req, res, next) => {
     const findUserByIdAndUpdate = await User.findOneAndUpdate(
       byIdInChurch(id, req),
       { $set: { isActive: false } },
-      { new: true },
+      { returnDocument: "after" },
     ).select("-password");
     if (!findUserByIdAndUpdate)
       return res.status(404).json({ error: "User not found!" });

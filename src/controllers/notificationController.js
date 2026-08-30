@@ -32,7 +32,7 @@ const markAsRead = async (req, res, next) => {
      await Notification.findByIdAndUpdate(
       id,
       { $set: { isRead: true } },
-      { new: true, runValidators: true },
+      { returnDocument: "after", runValidators: true },
     );
 
     res.status(200).json({

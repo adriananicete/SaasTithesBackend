@@ -69,7 +69,7 @@ const updateCategory = async (req, res, next) => {
         type,
         color,
       },
-      { new: true },
+      { returnDocument: "after" },
     );
     if (!updatedCategory)
       return res.status(404).json({ error: "Category not found" });
