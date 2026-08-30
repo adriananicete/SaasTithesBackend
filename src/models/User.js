@@ -44,16 +44,6 @@ const userSchema = new mongoose.Schema({
         type: String,
         enum: ALL_ROLES,
     },
-    // Password reset — stores the SHA-256 hash of the emailed token (never the
-    // raw token) plus its expiry. Cleared once the password is reset.
-    resetPasswordToken: {
-        type: String,
-        default: null,
-    },
-    resetPasswordExpires: {
-        type: Date,
-        default: null,
-    },
 }, {timestamps: true});
 
 // Email is unique PER CHURCH, not globally — the same person may hold an

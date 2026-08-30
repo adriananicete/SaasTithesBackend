@@ -6,6 +6,16 @@ import { recordAudit } from "../utils/recordAudit.js";
 import { byIdInChurch } from "../utils/tenantScope.js";
 import { nextNumber } from "../utils/sequence.js";
 import { getAvailableBalance, peso } from "../utils/balance.js";
+import { destroyCloudinaryAsset } from "../utils/cloudinaryCleanup.js";
+
+// Cloudinary stores the public id in the URL path: everything after
+// /upload/<version>/ minus the file extension. Deleting an attachment needs it,
+// and the RF only stores the URL.
+const rfAttachmentPublicId = (url) => {
+  const after = String(url).split("/upload/")[1];
+  if (!after) return null;
+  return after.replace(/^v\d+\//, "").replace(/\.[^./]+$/, "");
+};
 import {
   NOTIFY_RF_SUBMITTED,
   NOTIFY_RF_VALIDATED,
@@ -83,7 +93,7 @@ const getAllRequestForms = async (req, res, next) => {
 
 const createRequestForm = async (req, res, next) => {
   try {
-    const { entryDate, category, estimatedAmount, attachments, remarks } = req.body;
+    const { entryDate, category, estimatedAmount, remarks } = req.body;
 
     if (!entryDate)
       return res.status(400).json({ error: "Entry Date required!" });
@@ -131,7 +141,9 @@ const createRequestForm = async (req, res, next) => {
       category,
       estimatedAmount: amount,
       requestedBy: req.user.id,
-      attachments: attachments || [],
+      // Attachments arrive through POST /:id/attachments, never in the body —
+      // otherwise any string could be stored and served as an attachment URL.
+      attachments: [],
       remarks: String(remarks).trim(),
     });
 
@@ -150,6 +162,105 @@ const createRequestForm = async (req, res, next) => {
       status: "Success",
       message: "Request Form Created",
       data: newRequestForm,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// POST /api/request-form/:id/attachments — the requester, while still a draft.
+// Same rules as editing the form itself: once it is submitted the supporting
+// documents are part of what the validator reviewed.
+const addRfAttachments = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id))
+      return res.status(400).json({ error: "Invalid ID" });
+
+    if (!req.files || req.files.length === 0)
+      return res.status(400).json({ error: "No files uploaded" });
+
+    const requestForm = await RequestForm.findOne(byIdInChurch(id, req));
+    if (!requestForm)
+      return res.status(404).json({ error: "Request form not found" });
+
+    if (requestForm.requestedBy.toString() !== req.user.id)
+      return res.status(403).json({ error: "Invalid User!" });
+
+    if (requestForm.status !== "draft")
+      return res.status(400).json({ error: "Status must be draft" });
+
+    const added = req.files.map((file) => file.path);
+    if (requestForm.attachments.length + added.length > 5)
+      return res.status(400).json({ error: "A request form may hold up to 5 attachments" });
+
+    requestForm.attachments.push(...added);
+    await requestForm.save();
+
+    await recordAudit({
+      req,
+      action: "rf.attach",
+      targetModel: "RequestForm",
+      targetId: requestForm._id,
+      targetRef: requestForm.rfNo,
+      summary: `Added ${added.length} attachment(s) to ${requestForm.rfNo}`,
+      meta: { count: added.length },
+    });
+
+    res.status(200).json({
+      status: "Success",
+      message: `${added.length} attachment(s) added`,
+      data: requestForm,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// DELETE /api/request-form/:id/attachments — body { url }.
+const removeRfAttachment = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id))
+      return res.status(400).json({ error: "Invalid ID" });
+
+    const { url } = req.body || {};
+    if (!url) return res.status(400).json({ error: "url required" });
+
+    const requestForm = await RequestForm.findOne(byIdInChurch(id, req));
+    if (!requestForm)
+      return res.status(404).json({ error: "Request form not found" });
+
+    if (requestForm.requestedBy.toString() !== req.user.id)
+      return res.status(403).json({ error: "Invalid User!" });
+
+    if (requestForm.status !== "draft")
+      return res.status(400).json({ error: "Status must be draft" });
+
+    if (!requestForm.attachments.includes(url))
+      return res.status(404).json({ error: "Attachment not found on this request form" });
+
+    // The stored value is the Cloudinary URL; the public id is the path after
+    // /upload/<version>/ without the extension.
+    const publicId = rfAttachmentPublicId(url);
+    await destroyCloudinaryAsset(publicId, `attachment on ${requestForm.rfNo}`);
+
+    requestForm.attachments = requestForm.attachments.filter((a) => a !== url);
+    await requestForm.save();
+
+    await recordAudit({
+      req,
+      action: "rf.detach",
+      targetModel: "RequestForm",
+      targetId: requestForm._id,
+      targetRef: requestForm.rfNo,
+      summary: `Removed an attachment from ${requestForm.rfNo}`,
+    });
+
+    res.status(200).json({
+      status: "Success",
+      message: "Attachment removed",
+      data: requestForm,
     });
   } catch (error) {
     next(error);
@@ -232,11 +343,12 @@ const updateRequestForm = async (req, res, next) => {
     if (findRequestFormById.status !== "draft")
       return res.status(400).json({ error: "Status must be draft" });
 
+    // "attachments" is deliberately absent: they are added and removed through
+    // their own endpoints, which upload real files rather than trusting a URL.
     const allowedUpdates = [
       "entryDate",
       "category",
       "estimatedAmount",
-      "attachments",
       "remarks",
     ];
     const updates = {};
@@ -666,6 +778,8 @@ const receivedRequestForm = async (req, res, next) => {
 export {
   getAllRequestForms,
   createRequestForm,
+  addRfAttachments,
+  removeRfAttachment,
   submitRequestForm,
   updateRequestForm,
   deleteRequestForm,

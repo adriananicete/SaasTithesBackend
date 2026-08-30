@@ -119,6 +119,40 @@ export const uploadChurchLogo = multer({
     },
 });
 
+// Supporting documents for a request form — a quotation, a photo of the thing
+// being replaced. Images only, matching receipts and avatars: the fileFilter
+// and Cloudinary's resource_type are both image-bound, so a PDF would need its
+// own path (noted in businessRequirements §14 item 7).
+const rfAttachmentStorage = new CloudinaryStorage({
+    cloudinary,
+    params: async (req) => ({
+        folder: await churchFolder(req, 'attachments'),
+        allowed_formats: ALLOWED_FORMATS,
+        resource_type: 'image',
+    }),
+});
+
+export const uploadRfAttachments = multer({
+    storage: rfAttachmentStorage,
+    fileFilter,
+    limits: {
+        fileSize: 10 * 1024 * 1024,
+        files: 5,
+    },
+});
+
+export const handleAttachmentUploadError = (err, req, res, next) => {
+    if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE')
+            return res.status(400).json({ error: 'Each file must be 10MB or smaller' });
+        if (err.code === 'LIMIT_FILE_COUNT')
+            return res.status(400).json({ error: 'You can upload up to 5 attachments only' });
+        return res.status(400).json({ error: err.message });
+    }
+    if (err) return res.status(400).json({ error: err.message });
+    next();
+};
+
 export const handleLogoUploadError = (err, req, res, next) => {
     if (err instanceof multer.MulterError) {
         if (err.code === 'LIMIT_FILE_SIZE')

@@ -25,7 +25,8 @@
     "check:profile": "node --env-file=.env src/scripts/checkChurchProfile.js",
     "check:branding": "node --env-file=.env src/scripts/checkExportBranding.js",
     "check:chain": "node --env-file=.env src/scripts/checkFullChain.js",
-    "check:money": "node --env-file=.env src/scripts/checkMoneyIntegrity.js"
+    "check:money": "node --env-file=.env src/scripts/checkMoneyIntegrity.js",
+    "check:backlog": "node --env-file=.env src/scripts/checkBacklog.js"
   },
   "engines": {
     "node": "22.x"

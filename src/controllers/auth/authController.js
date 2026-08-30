@@ -1,5 +1,4 @@
 import bcrypt from 'bcrypt';
-import crypto from 'crypto';
 import { User } from '../../models/User.js';
 import { Church } from '../../models/Church.js';
 import { isValidObjectId } from '../../utils/validate.js';
@@ -11,11 +10,8 @@ import {
     setAuthCookies,
     clearAuthCookies,
 } from '../../utils/authTokens.js';
-import { sendPasswordResetEmail } from '../../utils/email.js';
 import { recordAudit } from '../../utils/recordAudit.js';
 
-const RESET_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
-const hashResetToken = (raw) => crypto.createHash('sha256').update(raw).digest('hex');
 
 export const userLogin = async (req, res, next) => {
     const { email, password, church } = req.body;
@@ -126,91 +122,4 @@ export const userLogout = async (req, res, next) => {
             message: 'User Logged out!'
         }
     })
-};
-
-// Step 1 of reset: always respond 200 (never reveal whether the email exists,
-// to avoid leaking which addresses are registered). If the user exists, store a
-// hashed, time-limited token and email the raw token as a reset link.
-export const forgotPassword = async (req, res, next) => {
-    const { email } = req.body;
-    try {
-        if (!email) return res.status(400).json({ error: 'Email is required' });
-
-        const user = await User.findOne({ email });
-        if (user && user.isActive) {
-            const rawToken = crypto.randomBytes(32).toString('hex');
-            user.resetPasswordToken = hashResetToken(rawToken);
-            user.resetPasswordExpires = new Date(Date.now() + RESET_TOKEN_TTL_MS);
-            await user.save();
-
-            await recordAudit({
-                actor: { id: user._id, role: user.role, name: user.name },
-                church: user.church,
-                action: 'auth.forgot_password',
-                targetModel: 'User',
-                targetId: user._id,
-                targetRef: user.email,
-                summary: 'Requested a password reset link',
-            });
-
-            const base = (process.env.FRONTEND_URL || '').replace(/\/$/, '');
-            const resetLink = `${base}/reset-password?token=${rawToken}`;
-            try {
-                await sendPasswordResetEmail(user.email, resetLink);
-            } catch (mailErr) {
-                // Don't leak mail failures to the client, but surface server-side.
-                console.error('[forgotPassword] email send failed:', mailErr?.message || mailErr);
-            }
-        }
-
-        return res.status(200).json({
-            status: 'Success',
-            data: { message: 'If that email is registered, a reset link has been sent.' },
-        });
-    } catch (error) {
-        next(error);
-    }
-};
-
-// Step 2 of reset: verify the hashed token + expiry, set the new password.
-export const resetPassword = async (req, res, next) => {
-    const { token, password } = req.body;
-    try {
-        if (!token || !password) {
-            return res.status(400).json({ error: 'Token and new password are required' });
-        }
-        if (password.length < 8) {
-            return res.status(400).json({ error: 'Password must be at least 8 characters' });
-        }
-
-        const user = await User.findOne({
-            resetPasswordToken: hashResetToken(token),
-            resetPasswordExpires: { $gt: new Date() },
-        });
-        if (!user) {
-            return res.status(400).json({ error: 'Reset link is invalid or has expired' });
-        }
-
-        user.password = await bcrypt.hash(password, 10);
-        user.resetPasswordToken = null;
-        user.resetPasswordExpires = null;
-        await user.save();
-
-        await recordAudit({
-            actor: { id: user._id, role: user.role, name: user.name },
-            church: user.church,
-            action: 'auth.reset_password',
-            targetModel: 'User',
-            targetId: user._id,
-            targetRef: user.email,
-            summary: 'Reset password via email link',
-        });
-
-        return res.status(200).json({
-            status: 'Success',
-            data: { message: 'Password has been reset. You can now log in.' },
-        });
-    } catch (error) {
-        next(error);
-    }
 };

@@ -93,7 +93,7 @@ export const changePassword = async (req, res, next) => {
 
         const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-        const findeUser = await User.findByIdAndUpdate(id,{$set: {password: hashedPassword}},{new:true});
+        const findeUser = await User.findByIdAndUpdate(id,{$set: {password: hashedPassword}},{ returnDocument: "after" });
 
         await recordAudit({
             req,
