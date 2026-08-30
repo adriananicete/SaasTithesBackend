@@ -7,6 +7,7 @@ import { autoRecordExpense } from "../utils/autoRecordExpense.js";
 import { sendNotification, sendNotificationToRoles } from "../utils/sendNotification.js";
 import { recordAudit } from "../utils/recordAudit.js";
 import { byIdInChurch, churchFilter } from "../utils/tenantScope.js";
+import { nextNumber } from "../utils/sequence.js";
 import {
   VOUCHER_ROLES,
   VOUCHER_WRITE_ROLES,
@@ -84,24 +85,9 @@ const createVoucher = async (req, res, next) => {
     if (remarks !== undefined && remarks !== findRequestFormbyId.remarks)
       rfUpdates.remarks = remarks;
 
-    // Numbering is per church — each starts at PCF-0001 — so the "last"
-    // voucher must be the last in THIS church. Still racy; Branch 12 replaces
-    // this with an atomic counter. Scoping it does not make it less racy.
-    const generatePCFNo = async () => {
-      const lastPCF = await Voucher.findOne(churchFilter(req)).sort({ createdAt: -1 });
-      let newNumber = 1;
-
-      if (lastPCF && lastPCF.pcfNo) {
-        const lastNum = parseInt(lastPCF.pcfNo.split("-")[1], 10);
-        if (!isNaN(lastNum)) newNumber = lastNum + 1;
-      }
-
-      return `PCF-${String(newNumber).padStart(4, "0")}`;
-    };
-
     const newVoucher = new Voucher({
       church: req.user.church,
-      pcfNo: await generatePCFNo(),
+      pcfNo: await nextNumber(req.user.church, "pcfNo", "PCF"),
       rfId: rfId,
       date: Date.now(),
       category: category,
