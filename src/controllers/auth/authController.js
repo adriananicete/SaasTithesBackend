@@ -145,6 +145,7 @@ export const forgotPassword = async (req, res, next) => {
 
             await recordAudit({
                 actor: { id: user._id, role: user.role, name: user.name },
+                church: user.church,
                 action: 'auth.forgot_password',
                 targetModel: 'User',
                 targetId: user._id,
@@ -197,6 +198,7 @@ export const resetPassword = async (req, res, next) => {
 
         await recordAudit({
             actor: { id: user._id, role: user.role, name: user.name },
+            church: user.church,
             action: 'auth.reset_password',
             targetModel: 'User',
             targetId: user._id,

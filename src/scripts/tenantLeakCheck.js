@@ -119,6 +119,12 @@ const main = async () => {
   if (!tokenA) { console.error("could not log in as church A's admin"); process.exit(1); }
 
   // ------------------------------------------------------------- reads -----
+  // A row may name the part of the response to scan. Only one does: /search
+  // echoes the caller's own query back as `q`, so searching FOR the marker puts
+  // the marker in the body no matter what — the row reported a leak even with
+  // `results: []`. That is the caller's input reflected, never another church's
+  // data, so the scan targets `results`. Everything else is scanned whole; a
+  // narrower default would be a way to miss real leaks.
   const reads = [
     ["tithes", "GET /tithes"],
     ["request forms", "GET /request-form"],
@@ -128,17 +134,17 @@ const main = async () => {
     ["categories", "GET /admin/categories"],
     ["users", "GET /admin/users"],
     ["audit log", "GET /audit-log"],
-    ["search", "GET /search?q=" + MARKERS.B],
+    ["search", "GET /search?q=" + MARKERS.B, (r) => JSON.stringify(r.json?.results ?? [])],
     ["search", "GET /search?q=RF"],
     ["reports", "GET /reports/tithes"],
     ["reports", "GET /reports/expense"],
     ["reports", "GET /reports/combined"],
   ];
 
-  for (const [area, spec] of reads) {
+  for (const [area, spec, pick] of reads) {
     const [method, path] = spec.split(" ");
     const r = await call(method, path, { token: tokenA });
-    record(area, spec, findLeak(r.text), `status ${r.status}`);
+    record(area, spec, findLeak(pick ? pick(r) : r.text), `status ${r.status}`);
   }
 
   // Presence only reports users who have beaten recently, so church B's users

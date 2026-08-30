@@ -145,6 +145,7 @@ const createVoucher = async (req, res, next) => {
     });
 
     await sendNotificationToRoles({
+      church: req.user.church,
       roles: NOTIFY_VOUCHER_CHANGED,
       message: `Voucher ${newVoucher.pcfNo} created for ${vouch.rfNo}`,
       type: "info",
@@ -244,6 +245,7 @@ const cancelVoucher = async (req, res, next) => {
     });
 
     await sendNotificationToRoles({
+      church: req.user.church,
       roles: NOTIFY_VOUCHER_CHANGED,
       message: `Voucher ${voucher.pcfNo} was cancelled and ${reopenedRf.rfNo} reopened`,
       type: "info",

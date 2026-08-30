@@ -1,9 +1,8 @@
 import { RequestForm } from "../models/RequestForm.js";
 import { Voucher } from "../models/Voucher.js";
 import { buildRfScope } from "./requestFormController.js";
-
-// Roles allowed to see vouchers at all (mirrors getAllVouchers + the NAV gate).
-const VOUCHER_ROLES = ["validator", "do", "auditor", "admin"];
+import { withChurch } from "../utils/tenantScope.js";
+import { VOUCHER_ROLES } from "../constants/roles.js";
 
 // Escape regex special chars so user input can't break the query or inject a
 // pathological pattern.
@@ -14,7 +13,10 @@ const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 // (RF-/PCF-) and remarks/particulars. Results are role-scoped server-side:
 //   - RF rows use the same buildRfScope as the table (no leak).
 //   - Vouchers only for roles that may view vouchers; voucher particulars live
-//     on the linked RF's remarks, so we match those too.
+//     on the linked RF's remarks, so we match those too — and that lookup runs
+//     through buildRfScope as well. It used to be a bare RequestForm.find,
+//     which bypassed role scoping entirely (a member could surface an RF they
+//     may not see) long before it was also a cross-church leak.
 const globalSearch = async (req, res, next) => {
   try {
     const q = (req.query.q || "").trim();
@@ -52,12 +54,14 @@ const globalSearch = async (req, res, next) => {
     if (VOUCHER_ROLES.includes(req.user.role)) {
       // Voucher particulars come from the linked RF's remarks, so resolve the
       // matching RF ids first, then match vouchers by pcfNo OR linked RF.
-      const matchedRfs = await RequestForm.find({ remarks: rx }).select("_id");
+      const matchedRfs = await RequestForm.find({
+        $and: [buildRfScope(req.user), { remarks: rx }],
+      }).select("_id");
       const rfIdList = matchedRfs.map((d) => d._id);
 
-      const voucherDocs = await Voucher.find({
-        $or: [{ pcfNo: rx }, { rfId: { $in: rfIdList } }],
-      })
+      const voucherDocs = await Voucher.find(
+        withChurch({ $or: [{ pcfNo: rx }, { rfId: { $in: rfIdList } }] }, req),
+      )
         .sort({ createdAt: -1 })
         .limit(limit)
         .populate({ path: "rfId", select: "rfNo remarks" })
