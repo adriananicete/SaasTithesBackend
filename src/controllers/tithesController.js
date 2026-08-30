@@ -125,12 +125,13 @@ const submitTithes = async (req, res, next) => {
       excludeUserId: req.user.id,
     });
 
+    // `data` is the document, like every other create in this codebase. It used
+    // to be `data: { newTithes }` — one level deeper than anywhere else, which
+    // nothing about a tithes entry justified (businessRequirements §14 item 10).
     res.status(201).json({
       status: "Success",
       message: "New Tithes Created, Pending for approval",
-      data: {
-        newTithes,
-      },
+      data: newTithes,
     });
   } catch (error) {
     next(error);
