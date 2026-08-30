@@ -17,7 +17,11 @@ const auditLogSchema = new mongoose.Schema(
     action: { type: String, required: true }, // e.g. "rf.approve", "voucher.cancel"
     targetModel: {
       type: String,
-      enum: ["Tithes", "RequestForm", "Voucher", "Expense", "User", "Category"],
+      // "Church" added in Branch 13 for the tenant-facing profile and logo
+      // endpoints. The frontend's audit table needs a label for it — a paired
+      // change, additive so an unhandled value renders as the raw string
+      // rather than breaking.
+      enum: ["Tithes", "RequestForm", "Voucher", "Expense", "User", "Category", "Church"],
       required: true,
     },
     targetId: { type: mongoose.Schema.Types.ObjectId },
