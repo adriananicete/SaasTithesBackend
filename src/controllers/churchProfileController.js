@@ -1,5 +1,5 @@
 import { Church } from "../models/Church.js";
-import cloudinary from "../config/cloudinary.js";
+import { destroyCloudinaryAsset } from "../utils/cloudinaryCleanup.js";
 import { recordAudit } from "../utils/recordAudit.js";
 import { invalidateChurchBranding } from "../services/churchBranding.js";
 
@@ -82,9 +82,7 @@ const setMyChurchLogo = async (req, res, next) => {
     if (!church) return res.status(404).json({ error: "Church not found" });
 
     // Replace, don't accumulate — same pattern as the user avatar.
-    if (church.logoPublicId) {
-      try { await cloudinary.uploader.destroy(church.logoPublicId); } catch (e) { /* non-fatal */ }
-    }
+    await destroyCloudinaryAsset(church.logoPublicId, `replaced logo for ${church.name}`);
 
     church.logoUrl = req.file.path;
     church.logoPublicId = req.file.filename;
@@ -119,9 +117,7 @@ const removeMyChurchLogo = async (req, res, next) => {
     if (!church.logoUrl)
       return res.status(400).json({ error: "This church has no logo to remove" });
 
-    if (church.logoPublicId) {
-      try { await cloudinary.uploader.destroy(church.logoPublicId); } catch (e) { /* non-fatal */ }
-    }
+    await destroyCloudinaryAsset(church.logoPublicId, `removed logo for ${church.name}`);
 
     church.logoUrl = null;
     church.logoPublicId = null;
