@@ -17,7 +17,8 @@
     "seed:churches": "node --env-file=.env src/scripts/seedTwoChurches.js",
     "check:users": "node --env-file=.env src/scripts/checkUsers.js",
     "check:tithes-rf": "node --env-file=.env src/scripts/checkTithesRf.js",
-    "check:vouchers": "node --env-file=.env src/scripts/checkVouchersExpenses.js"
+    "check:vouchers": "node --env-file=.env src/scripts/checkVouchersExpenses.js",
+    "check:reports": "node --env-file=.env src/scripts/checkReports.js"
   },
   "engines": {
     "node": "22.x"

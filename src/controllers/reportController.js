@@ -1,6 +1,8 @@
 import { Expense } from "../models/Expense.js";
 import { Tithes } from "../models/TithesEntry.js";
 import { parseDate } from "../utils/validate.js";
+import { withChurch } from "../utils/tenantScope.js";
+import { ROLES } from "../constants/roles.js";
 import PDFDocument from "pdfkit";
 import excel from "exceljs";
 import {
@@ -36,17 +38,26 @@ const parseDateRange = (req, res) => {
   return { start: null, end: null };
 };
 
-const fetchTithes = (start, end) => {
+// These two are the ONLY place a report query is built, so there is exactly one
+// line per model carrying the church. They used to take a bare (start, end) and
+// three of the tithes handlers rebuilt the filter inline rather than calling
+// through — four copies of one query, four chances to miss the church filter.
+// Printed financial documents are the highest-consequence leak in the system;
+// they are worth having a single door.
+const fetchTithes = (req, { start, end }) => {
   // Reports reflect actual collections, so only approved tithes count.
-  const filter = { status: "approved" };
+  const filter = withChurch({ status: "approved" }, req);
   if (start && end) filter.entryDate = { $gte: start, $lte: end };
+  // A member's report is their own submissions only (businessRequirements §8).
+  // Never fires on the combined report, which is admin/auditor only.
+  if (req.user.role === ROLES.MEMBER) filter.submittedBy = req.user.id;
   return Tithes.find(filter)
     .populate("submittedBy", "name role")
     .populate("reviewedBy", "name role");
 };
 
-const fetchExpenses = (start, end) => {
-  const filter = {};
+const fetchExpenses = (req, { start, end }) => {
+  const filter = withChurch({}, req);
   if (start && end) filter.date = { $gte: start, $lte: end };
   return Expense.find(filter)
     .populate("category", "name type")
@@ -64,25 +75,10 @@ const newPdf = () =>
 
 const getTithesReport = async (req, res, next) => {
   try {
-    const { startDate, endDate } = req.query;
-    // Reports reflect actual collections, so only approved tithes count.
-    const filter = { status: "approved" };
+    const range = parseDateRange(req, res);
+    if (!range) return;
 
-    if (startDate && endDate) {
-      const start = parseDate(startDate);
-      const end = parseDate(endDate);
-      if (!start || !end)
-        return res.status(400).json({ error: "Invalid startDate or endDate" });
-      filter.entryDate = { $gte: start, $lte: end };
-    }
-
-    if (req.user.role === "member") {
-      filter.submittedBy = req.user.id;
-    }
-
-    const getAllTithes = await Tithes.find(filter)
-      .populate("submittedBy", "name role")
-      .populate("reviewedBy", "name role");
+    const getAllTithes = await fetchTithes(req, range);
 
     res.status(200).json({
       status: "Success",
@@ -96,24 +92,16 @@ const getTithesReport = async (req, res, next) => {
 
 const getExpenseReport = async (req, res, next) => {
   try {
-    if (req.user.role === "member")
+    if (req.user.role === ROLES.MEMBER)
       return res.status(403).json({ error: "Forbidden" });
 
-    const { startDate, endDate } = req.query;
-    const filter = {};
+    const range = parseDateRange(req, res);
+    if (!range) return;
 
-    if (startDate && endDate) {
-      const start = parseDate(startDate);
-      const end = parseDate(endDate);
-      if (!start || !end)
-        return res.status(400).json({ error: "Invalid startDate or endDate" });
-      filter.date = { $gte: start, $lte: end };
-    }
-
-    const getAllExpense = await Expense.find(filter)
-      .populate("recordedBy", "name role")
-      .populate("category", "name type")
-      .populate("linkedId", "pcfNo amount");
+    // Now shares fetchExpenses with the exports, which populate one level
+    // deeper (linkedId.rfId's remarks and rfNo). Purely additive for the
+    // client, and it makes the on-screen report and its export agree.
+    const getAllExpense = await fetchExpenses(req, range);
 
     res.status(200).json({
       status: "Success",
@@ -131,14 +119,7 @@ const exportTithesExcel = async (req, res, next) => {
     if (!range) return;
     const { startDate, endDate } = req.query;
 
-    // Reports reflect actual collections, so only approved tithes count.
-    const filter = { status: "approved" };
-    if (range.start && range.end)
-      filter.entryDate = { $gte: range.start, $lte: range.end };
-    if (req.user.role === "member") filter.submittedBy = req.user.id;
-    const tithes = await Tithes.find(filter)
-      .populate("submittedBy", "name role")
-      .populate("reviewedBy", "name role");
+    const tithes = await fetchTithes(req, range);
 
     const wb = new excel.Workbook();
     buildExcelSheet(wb.addWorksheet("Tithes"), {
@@ -166,14 +147,7 @@ const exportTithesPDF = async (req, res, next) => {
     if (!range) return;
     const { startDate, endDate } = req.query;
 
-    // Reports reflect actual collections, so only approved tithes count.
-    const filter = { status: "approved" };
-    if (range.start && range.end)
-      filter.entryDate = { $gte: range.start, $lte: range.end };
-    if (req.user.role === "member") filter.submittedBy = req.user.id;
-    const tithes = await Tithes.find(filter)
-      .populate("submittedBy", "name role")
-      .populate("reviewedBy", "name role");
+    const tithes = await fetchTithes(req, range);
 
     const doc = newPdf();
     res.setHeader("Content-Type", "application/pdf");
@@ -205,7 +179,7 @@ const exportExpenseExcel = async (req, res, next) => {
     if (!range) return;
     const { startDate, endDate } = req.query;
 
-    const expenses = await fetchExpenses(range.start, range.end);
+    const expenses = await fetchExpenses(req, range);
 
     const wb = new excel.Workbook();
     buildExcelSheet(wb.addWorksheet("Expense"), {
@@ -232,7 +206,7 @@ const exportExpensePDF = async (req, res, next) => {
     if (!range) return;
     const { startDate, endDate } = req.query;
 
-    const expenses = await fetchExpenses(range.start, range.end);
+    const expenses = await fetchExpenses(req, range);
 
     const doc = newPdf();
     res.setHeader("Content-Type", "application/pdf");
@@ -265,8 +239,8 @@ const getCombinedReport = async (req, res, next) => {
     if (!range) return;
 
     const [tithes, expenses] = await Promise.all([
-      fetchTithes(range.start, range.end),
-      fetchExpenses(range.start, range.end),
+      fetchTithes(req, range),
+      fetchExpenses(req, range),
     ]);
 
     res.status(200).json({
@@ -287,8 +261,8 @@ const exportCombinedExcel = async (req, res, next) => {
     const { startDate, endDate } = req.query;
 
     const [tithes, expenses] = await Promise.all([
-      fetchTithes(range.start, range.end),
-      fetchExpenses(range.start, range.end),
+      fetchTithes(req, range),
+      fetchExpenses(req, range),
     ]);
     const summary = computeCombinedSummary(tithes, expenses);
 
@@ -352,8 +326,8 @@ const exportCombinedPDF = async (req, res, next) => {
     const { startDate, endDate } = req.query;
 
     const [tithes, expenses] = await Promise.all([
-      fetchTithes(range.start, range.end),
-      fetchExpenses(range.start, range.end),
+      fetchTithes(req, range),
+      fetchExpenses(req, range),
     ]);
     const summary = computeCombinedSummary(tithes, expenses);
 
