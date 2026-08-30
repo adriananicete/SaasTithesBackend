@@ -23,7 +23,8 @@
     "check:numbering": "node --env-file=.env src/scripts/checkNumbering.js",
     "check:profile": "node --env-file=.env src/scripts/checkChurchProfile.js",
     "check:branding": "node --env-file=.env src/scripts/checkExportBranding.js",
-    "check:chain": "node --env-file=.env src/scripts/checkFullChain.js"
+    "check:chain": "node --env-file=.env src/scripts/checkFullChain.js",
+    "check:money": "node --env-file=.env src/scripts/checkMoneyIntegrity.js"
   },
   "engines": {
     "node": "22.x"

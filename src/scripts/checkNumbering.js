@@ -20,6 +20,7 @@ import { connectDB } from "../config/db.js";
 import { User } from "../models/User.js";
 import { Category } from "../models/Category.js";
 import { Counter } from "../models/Counter.js";
+import { Tithes } from "../models/TithesEntry.js";
 import { nextNumber } from "../utils/sequence.js";
 
 const BASE = process.env.CHECK_BASE_URL || "http://localhost:7001/api";
@@ -90,7 +91,7 @@ const main = async () => {
     created.push([churchId, name]);
 
     const hashed = await bcrypt.hash("SeedPass123!", 10);
-    await User.create({
+    const member = await User.create({
       church: churchId, name: `${name} Member`, email: `member@${slugHint}.test`,
       password: hashed, role: "member", isActive: true,
     });
@@ -99,6 +100,15 @@ const main = async () => {
     });
 
     const rfCategory = await Category.findOne({ church: churchId, type: "rf" });
+
+    // Fund the church. Since §14 item 2 the backend caps a request at the
+    // church's available balance, so a church with no approved tithes cannot
+    // create a request form at all — and this check needs to create a dozen.
+    const admin = await User.findOne({ church: churchId, role: "admin" });
+    await Tithes.create({
+      church: churchId, entryDate: new Date(), serviceType: "Sunday Service",
+      total: 100000, status: "approved", submittedBy: member._id, reviewedBy: admin._id,
+    });
 
     return { churchId, name, rfCategory, memberToken: memberLogin.json?.token };
   };
@@ -131,13 +141,16 @@ const main = async () => {
 
   const numbers = burst.filter((r) => r.status === 201).map((r) => r.json?.data?.rfNo);
   const unique = new Set(numbers);
-  is(unique.size, numbers.length, `every number is distinct (${unique.size} unique)`);
+  // Compared against BURST, not against numbers.length: "0 of 0 are distinct"
+  // is true and proves nothing, which is exactly what this reported when the
+  // creates were all being refused.
+  is(unique.size, BURST, `all ${BURST} numbers came back and are distinct`);
 
   const ordered = [...unique].map(seq).sort((x, y) => x - y);
-  const contiguous = ordered.every((n, i) => n === ordered[0] + i);
+  const contiguous = ordered.length === BURST && ordered.every((n, i) => n === ordered[0] + i);
   contiguous
     ? ok(`they run without gaps: RF-${String(ordered[0]).padStart(4, "0")} … RF-${String(ordered.at(-1)).padStart(4, "0")}`)
-    : bad("the numbers have gaps", ordered.join(", "));
+    : bad("the numbers are not a contiguous run", ordered.join(", ") || "(none)");
   is(ordered[0], 1, "and they start at 1 — a new church's first RF is RF-0001");
 
   const counterA = await Counter.findOne({ church: a.churchId, key: "rfNo" });
