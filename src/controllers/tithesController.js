@@ -154,6 +154,8 @@ const submitTithes = async (req, res, next) => {
 const approveTithes = async (req, res, next) => {
   try {
     const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id))
+      return res.status(400).json({ error: "Invalid ID" });
 
     const finderTithes = await Tithes.findOne(byIdInChurch(id, req));
     if (!finderTithes)
@@ -215,6 +217,8 @@ const approveTithes = async (req, res, next) => {
 const rejectTithes = async (req, res, next) => {
   try {
     const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id))
+      return res.status(400).json({ error: "Invalid ID" });
     const { rejectionNote } = req.body;
 
     const findTithes = await Tithes.findOne(byIdInChurch(id, req));
@@ -278,6 +282,8 @@ const rejectTithes = async (req, res, next) => {
 const updateTithes = async (req, res, next) => {
   try {
     const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id))
+      return res.status(400).json({ error: "Invalid ID" });
     const { body } = req;
 
     const findyById = await Tithes.findOne(byIdInChurch(id, req));
