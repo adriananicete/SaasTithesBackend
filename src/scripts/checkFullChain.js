@@ -28,6 +28,8 @@ import { Category } from "../models/Category.js";
 import { Expense } from "../models/Expense.js";
 import { Voucher } from "../models/Voucher.js";
 import { Notification } from "../models/Notification.js";
+import { Tithes } from "../models/TithesEntry.js";
+import { RequestForm } from "../models/RequestForm.js";
 import { xlsxText, pdfVisibleText } from "./lib/exportScan.js";
 
 const BASE = process.env.CHECK_BASE_URL || "http://localhost:7001/api";
@@ -96,6 +98,10 @@ const readExport = async (path, kind, token) => {
 };
 
 const ROLES_TO_SEED = ["member", "do", "validator", "pastor", "auditor"];
+
+// Requests that are meant to fail. Kept out of the happy-path helpers so a
+// rejection can never be mistaken for a step of the chain.
+const REJECTION_NOTE = "Not this quarter — resubmit with three quotations.";
 
 const main = async () => {
   if (process.env.NODE_ENV === "production") {
@@ -370,6 +376,151 @@ const main = async () => {
     if (mentionsB && String(user.church) !== String(b.churchId)) crossed++;
   }
   is(crossed, 0, "no notification about one church's records reached the other's users");
+
+  // ===================================================================
+  // The unhappy paths. The chain above proves the product works when
+  // everyone says yes; these are the branches where somebody says no, and
+  // they are the ones that move money back. They run last, against church A,
+  // because every assertion above depends on exact balances.
+  // ===================================================================
+  const c = a;
+  const draft = async (amount, label) => {
+    const r = await call("POST", "/request-form", {
+      token: c.tokens.member,
+      body: {
+        entryDate: new Date(), category: String(c.rfCategory._id),
+        estimatedAmount: amount, remarks: `${c.slugHint} ${label}`,
+      },
+    });
+    return r.json?.data?._id;
+  };
+  const balance = async () =>
+    (await call("GET", "/tithes", { token: c.tokens.admin })).json?.availableBalance;
+
+  const balanceBefore = await balance();
+
+  // ------------------------------------------------- tithes rejected ------
+  console.log("\na rejected tithes entry never becomes money");
+  const entry = await call("POST", "/tithes", {
+    token: c.tokens.member,
+    body: {
+      entryDate: new Date(), serviceType: "Sunday Service",
+      denominations: [{ bill: 500, qty: 2, subtotal: 1000 }], total: 1000,
+    },
+  });
+  const entryId = entry.json?.data?._id;
+  is(entry.status, 201, "the member submits another entry");
+
+  const rejectedTithes = await call("PATCH", `/tithes/${entryId}/reject`, {
+    token: c.tokens.do, body: { rejectionNote: REJECTION_NOTE },
+  });
+  is(rejectedTithes.status, 200, "the DO rejects it");
+
+  const storedTithes = await Tithes.findById(entryId);
+  is(storedTithes?.status, "rejected", "the entry is marked rejected");
+  is(await balance(), balanceBefore,
+    "and the balance is unchanged — only approved tithes are money");
+
+  // ------------------------------------- RF rejected at each stage --------
+  console.log("\na request form can be refused at either review stage");
+  const atValidate = await draft(400, "rejected at validation");
+  await call("PATCH", `/request-form/${atValidate}/submit`, { token: c.tokens.member });
+  const vReject = await call("PATCH", `/request-form/${atValidate}/reject`, {
+    token: c.tokens.validator, body: { rejectionNote: REJECTION_NOTE },
+  });
+  is(vReject.status, 200, "the validator rejects a submitted form");
+  is((await RequestForm.findById(atValidate))?.status, "rejected", "it is marked rejected");
+
+  const atApprove = await draft(400, "rejected at approval");
+  await call("PATCH", `/request-form/${atApprove}/submit`, { token: c.tokens.member });
+  await call("PATCH", `/request-form/${atApprove}/validate`, { token: c.tokens.validator });
+  const pReject = await call("PATCH", `/request-form/${atApprove}/reject`, {
+    token: c.tokens.pastor, body: { rejectionNote: REJECTION_NOTE },
+  });
+  is(pReject.status, 200, "the pastor rejects a validated form");
+  is((await RequestForm.findById(atApprove))?.status, "rejected", "it is marked rejected too");
+
+  const noReason = await draft(400, "rejected without a reason");
+  await call("PATCH", `/request-form/${noReason}/submit`, { token: c.tokens.member });
+  const bare = await call("PATCH", `/request-form/${noReason}/reject`, {
+    token: c.tokens.validator, body: {},
+  });
+  is(bare.status, 400, "a rejection without a reason is refused");
+
+  is(await balance(), balanceBefore, "none of the rejections moved the balance");
+
+  // ------------------------------------------- the self-decision guard ----
+  // The guard only bites when the requester ALSO holds the reviewing role, so
+  // the validator and the pastor raise their own requests here.
+  console.log("\nnobody may review their own request (§5.4)");
+  const ownRf = await call("POST", "/request-form", {
+    token: c.tokens.validator,
+    body: {
+      entryDate: new Date(), category: String(c.rfCategory._id),
+      estimatedAmount: 300, remarks: `${c.slugHint} the validator's own request`,
+    },
+  });
+  const ownId = ownRf.json?.data?._id;
+  await call("PATCH", `/request-form/${ownId}/submit`, { token: c.tokens.validator });
+
+  const selfValidate = await call("PATCH", `/request-form/${ownId}/validate`, {
+    token: c.tokens.validator,
+  });
+  is(selfValidate.status, 403, "a validator cannot validate their own request");
+
+  const selfReject = await call("PATCH", `/request-form/${ownId}/reject`, {
+    token: c.tokens.validator, body: { rejectionNote: REJECTION_NOTE },
+  });
+  is(selfReject.status, 403, "nor reject it");
+
+  // Someone else validates it, so the pastor's own approval can be tried.
+  const pastorRf = await call("POST", "/request-form", {
+    token: c.tokens.pastor,
+    body: {
+      entryDate: new Date(), category: String(c.rfCategory._id),
+      estimatedAmount: 300, remarks: `${c.slugHint} the pastor's own request`,
+    },
+  });
+  const pastorId = pastorRf.json?.data?._id;
+  await call("PATCH", `/request-form/${pastorId}/submit`, { token: c.tokens.pastor });
+  await call("PATCH", `/request-form/${pastorId}/validate`, { token: c.tokens.validator });
+
+  const selfApprove = await call("PATCH", `/request-form/${pastorId}/approve`, {
+    token: c.tokens.pastor,
+  });
+  is(selfApprove.status, 403, "a pastor cannot approve their own request");
+
+  // ------------------------------- voucher cancelled, request reopened ----
+  console.log("\ncancelling a voucher gives the money and the request back");
+  const reopenId = await draft(500, "will be cancelled");
+  await call("PATCH", `/request-form/${reopenId}/submit`, { token: c.tokens.member });
+  await call("PATCH", `/request-form/${reopenId}/validate`, { token: c.tokens.validator });
+  await call("PATCH", `/request-form/${reopenId}/approve`, { token: c.tokens.pastor });
+
+  const issued = await sendForm("POST", "/vouchers", c.tokens.validator, {
+    rfId: reopenId, category: String(c.expenseCategory._id),
+    amount: 500, remarks: "will be cancelled",
+  }, [{ field: "receipts", buffer: ONE_PIXEL_PNG, name: "receipt.png" }]);
+  is(issued.status, 200, "a voucher is issued against it");
+  is(await balance(), balanceBefore - 500, "the balance drops by the amount");
+
+  const voucherId = issued.json?.data?._id;
+  const cancelled = await call("PATCH", `/vouchers/${voucherId}/cancel`, {
+    token: c.tokens.validator, body: { cancellationNote: "Wrong supplier." },
+  });
+  is(cancelled.status, 200, "the validator who issued it cancels it");
+
+  const reopened = await RequestForm.findById(reopenId);
+  is(reopened?.status, "approved", "the request form is reopened, not left stranded");
+  is(reopened?.voucherId, undefined, "and no longer points at a voucher");
+
+  is(await Expense.countDocuments({ church: c.churchId, linkedId: voucherId }), 0,
+    "the auto-recorded expense is reversed");
+  is(await balance(), balanceBefore, "so the balance is back to where it started");
+
+  const cancelledVoucher = await Voucher.findById(voucherId);
+  is(cancelledVoucher?.status, "cancelled",
+    "the voucher itself is kept, marked cancelled — it is a ledger of record");
 
   return su;
 };
