@@ -290,7 +290,7 @@ const updateChurch = async (req, res, next) => {
     }
 
     const church = await Church.findByIdAndUpdate(id, updates, {
-      new: true,
+      returnDocument: "after",
       runValidators: true,
     });
 
@@ -319,7 +319,7 @@ const setChurchActive = (isActive) => async (req, res, next) => {
     const church = await Church.findByIdAndUpdate(
       id,
       { $set: { isActive } },
-      { new: true },
+      { returnDocument: "after" },
     );
     if (!church) return res.status(404).json({ error: "Church not found!" });
 
