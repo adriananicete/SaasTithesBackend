@@ -7,6 +7,9 @@ import { withChurch, byIdInChurch } from "../utils/tenantScope.js";
 import { getAvailableBalance } from "../utils/balance.js";
 import { NOTIFY_TITHES_SUBMITTED } from "../constants/roles.js";
 
+// Read off the schema rather than restated, so the two can never drift.
+const SERVICE_TYPES = Tithes.schema.path("serviceType").enumValues;
+
 // Only DO and admin can approve/reject tithes (auditor is oversight/read-only).
 const REVIEWER_ROLES = ["do", "admin"];
 
@@ -91,6 +94,16 @@ const submitTithes = async (req, res, next) => {
 
     if (!entryDate || !serviceType || !denominations || !total)
       return res.status(400).json({ error: "All fields are required!" });
+
+    // Without this the value falls through to Mongoose, whose ValidationError
+    // reaches the error handler as a 500 — a client mistake reported as a
+    // server fault. It matters more since the "Anniversay" typo was corrected
+    // (§14 item 6): a client still sending the old spelling is now wrong, and
+    // deserves to be told which values are valid rather than a 500.
+    if (!SERVICE_TYPES.includes(serviceType))
+      return res.status(400).json({
+        error: `serviceType must be one of: ${SERVICE_TYPES.join(", ")}`,
+      });
 
     if (total <= 0)
       return res.status(400).json({ error: "Tithes must be greater than 0!" });
@@ -267,6 +280,13 @@ const updateTithes = async (req, res, next) => {
     if (!mongoose.Types.ObjectId.isValid(id))
       return res.status(400).json({ error: "Invalid ID" });
     const { body } = req;
+
+    // Same reason as submitTithes: an edit carrying a bad serviceType would
+    // otherwise 500 out of runValidators below.
+    if (body?.serviceType !== undefined && !SERVICE_TYPES.includes(body.serviceType))
+      return res.status(400).json({
+        error: `serviceType must be one of: ${SERVICE_TYPES.join(", ")}`,
+      });
 
     const findyById = await Tithes.findOne(byIdInChurch(id, req));
     if (!findyById)
