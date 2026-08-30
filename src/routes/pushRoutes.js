@@ -1,7 +1,7 @@
 import express from "express";
 import { verifyToken } from "../middlewares/authMiddleware.js";
 import { blockInactiveChurch } from '../middlewares/tenantMiddleware.js';
-import { subscribe, unsubscribe } from "../controllers/pushController.js";
+import { subscribe, unsubscribe, getVapidPublicKey } from "../controllers/pushController.js";
 
 const router = express.Router();
 
@@ -10,6 +10,7 @@ const router = express.Router();
 // now redundant but harmless, and left in place as a second line of defence.
 router.use(verifyToken, blockInactiveChurch);
 
+router.get("/public-key", verifyToken, getVapidPublicKey);
 router.post("/subscribe", verifyToken, subscribe);
 router.delete("/subscribe", verifyToken, unsubscribe);
 

@@ -3,6 +3,7 @@ import { verifyToken } from '../middlewares/authMiddleware.js';
 import { blockInactiveChurch } from '../middlewares/tenantMiddleware.js';
 import { authorizeRoles } from '../middlewares/roleMiddleware.js';
 import { approveTithes, getAllTithes, rejectTithes, submitTithes, updateTithes } from '../controllers/tithesController.js';
+import { TITHES_REVIEWER_ROLES } from '../constants/roles.js';
 
 const router = express.Router();
 
@@ -14,7 +15,10 @@ router.use(verifyToken, blockInactiveChurch);
 router.get('/', verifyToken, getAllTithes);
 router.post('/', verifyToken, submitTithes);
 router.patch('/:id', verifyToken, updateTithes);
-router.patch('/:id/approve', verifyToken, authorizeRoles('do', 'auditor', 'admin'), approveTithes);
-router.patch('/:id/reject', verifyToken, authorizeRoles('do', 'auditor', 'admin'), rejectTithes);
+// auditor is deliberately absent: it is read-only oversight, and the
+// controller has always refused it. The route used to let it through and the
+// controller then 403'd, which is businessRequirements §14 item 3.
+router.patch('/:id/approve', verifyToken, authorizeRoles(...TITHES_REVIEWER_ROLES), approveTithes);
+router.patch('/:id/reject', verifyToken, authorizeRoles(...TITHES_REVIEWER_ROLES), rejectTithes);
 
 export default router;

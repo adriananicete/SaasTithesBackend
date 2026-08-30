@@ -1,5 +1,16 @@
 import { PushSubscription } from "../models/PushSubscription.js";
 
+// GET /api/push/public-key — the browser needs this as applicationServerKey
+// when it subscribes. Served rather than compiled into the frontend so the two
+// can never disagree: a mismatch is silent, the subscribe call succeeds and no
+// push ever arrives.
+const getVapidPublicKey = (req, res) => {
+  const key = process.env.VAPID_PUBLIC_KEY;
+  if (!key)
+    return res.status(503).json({ error: "Push is not configured on this server" });
+  res.status(200).json({ status: "Success", data: { publicKey: key } });
+};
+
 // POST /api/push/subscribe — save (upsert) the browser's push subscription for
 // the current user. Body: { endpoint, keys: { p256dh, auth } }.
 const subscribe = async (req, res, next) => {
@@ -32,4 +43,4 @@ const unsubscribe = async (req, res, next) => {
   }
 };
 
-export { subscribe, unsubscribe };
+export { subscribe, unsubscribe, getVapidPublicKey };

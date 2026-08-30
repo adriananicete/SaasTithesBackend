@@ -5,13 +5,13 @@ import mongoose from "mongoose";
 import { recordAudit } from "../utils/recordAudit.js";
 import { withChurch, byIdInChurch } from "../utils/tenantScope.js";
 import { getAvailableBalance } from "../utils/balance.js";
-import { NOTIFY_TITHES_SUBMITTED } from "../constants/roles.js";
+import { NOTIFY_TITHES_SUBMITTED, TITHES_REVIEWER_ROLES } from "../constants/roles.js";
 
 // Read off the schema rather than restated, so the two can never drift.
 const SERVICE_TYPES = Tithes.schema.path("serviceType").enumValues;
 
 // Only DO and admin can approve/reject tithes (auditor is oversight/read-only).
-const REVIEWER_ROLES = ["do", "admin"];
+// The route middleware enforces the same list, from the same constant.
 
 // Oversight roles see every per-entry row in the table.
 const TITHES_OVERSIGHT_ROLES = ["admin", "auditor", "pastor"];
@@ -161,7 +161,7 @@ const approveTithes = async (req, res, next) => {
     if (!finderTithes)
       return res.status(404).json({ error: "Tithes Entry not found!" });
 
-    if (!REVIEWER_ROLES.includes(req.user.role))
+    if (!TITHES_REVIEWER_ROLES.includes(req.user.role))
       return res
         .status(403)
         .json({ error: "You do not have permission to review tithes" });
@@ -222,7 +222,7 @@ const rejectTithes = async (req, res, next) => {
     if (!findTithes)
       return res.status(404).json({ error: "Tithes Entry not Found" });
 
-    if (!REVIEWER_ROLES.includes(req.user.role))
+    if (!TITHES_REVIEWER_ROLES.includes(req.user.role))
       return res
         .status(403)
         .json({ error: "You do not have permission to review tithes" });

@@ -2,7 +2,7 @@ import express from 'express';
 import { verifyToken } from '../../middlewares/authMiddleware.js';
 import { blockInactiveChurch } from '../../middlewares/tenantMiddleware.js';
 import { authorizeRoles } from '../../middlewares/roleMiddleware.js';
-import { createUser, deleteUser, getAllUsers, getUser, isActiveUser, updateUser, setUserAvatar, removeUserAvatar } from '../../controllers/admin/userController.js';
+import { createUser, deleteUser, getAllUsers, getUser, isActiveUser, updateUser, setUserAvatar, removeUserAvatar, resetUserPassword } from '../../controllers/admin/userController.js';
 import { uploadAvatar, handleAvatarUploadError } from '../../middlewares/uploadMiddleware.js';
 
 const router = express.Router();
@@ -34,6 +34,11 @@ router.patch('/:id/deactivate',verifyToken, authorizeRoles('admin'), isActiveUse
 
 // @desc   Set/replace a user's avatar
 // @routes /api/admin/users/:id/avatar
+// @desc   Reset a user's password — generated, shown once. The only recovery
+// @routes path in the system: an admin cannot SET a password, and
+//         changePassword needs the current one.
+router.patch('/:id/reset-password', verifyToken, authorizeRoles('admin'), resetUserPassword);
+
 router.patch('/:id/avatar',verifyToken, authorizeRoles('admin'), uploadAvatar.single('avatar'), handleAvatarUploadError, setUserAvatar);
 
 // @desc   Remove a user's avatar

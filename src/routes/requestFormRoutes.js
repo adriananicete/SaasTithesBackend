@@ -13,8 +13,14 @@ import {
   submitRequestForm,
   updateRequestForm,
   validateRequestForm,
+  addRfAttachments,
+  removeRfAttachment,
 } from "../controllers/requestFormController.js";
 import { addRfComment, getRfComments } from "../controllers/commentController.js";
+import {
+  uploadRfAttachments,
+  handleAttachmentUploadError,
+} from "../middlewares/uploadMiddleware.js";
 
 const router = express.Router();
 
@@ -29,6 +35,17 @@ router.post("/:id/comments", verifyToken, addRfComment);
 router.post("/", verifyToken, createRequestForm);
 router.patch("/:id", verifyToken, updateRequestForm);
 router.delete("/:id", verifyToken, deleteRequestForm);
+// Supporting documents. Requester-only and draft-only, the same rules as
+// editing the form itself.
+router.post(
+  "/:id/attachments",
+  verifyToken,
+  uploadRfAttachments.array("attachments", 5),
+  handleAttachmentUploadError,
+  addRfAttachments,
+);
+router.delete("/:id/attachments", verifyToken, removeRfAttachment);
+
 router.patch("/:id/submit", verifyToken, submitRequestForm);
 router.patch("/:id/validate", verifyToken, authorizeRoles("validator", "auditor", "admin"), validateRequestForm);
 router.patch("/:id/approve", verifyToken, authorizeRoles("admin", "auditor", "pastor"), approveRequestForm);

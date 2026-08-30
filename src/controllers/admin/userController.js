@@ -1,9 +1,11 @@
 import bcrypt from "bcrypt";
+import crypto from "crypto";
 import { User } from "../../models/User.js";
 import { destroyCloudinaryAsset } from "../../utils/cloudinaryCleanup.js";
 import { recordAudit } from "../../utils/recordAudit.js";
 import { churchFilter, byIdInChurch } from "../../utils/tenantScope.js";
 import { CHURCH_ROLES } from "../../constants/roles.js";
+import { isValidObjectId } from "../../utils/validate.js";
 
 const getAllUsers = async (req, res, next) => {
   try {
@@ -93,6 +95,52 @@ const createUser = async (req, res, next) => {
 // `church` — which would have moved a user into another tenant — and
 // `password`, which would have stored it unhashed.
 const USER_EDITABLE_FIELDS = ["name", "email", "role", "isActive"];
+
+// Long enough to be unguessable, short enough to read down a phone line.
+const generatePassword = () => crypto.randomBytes(9).toString("base64url");
+
+// PATCH /api/admin/users/:id/reset-password — admin only, own church only.
+//
+// The one way back in for someone who has forgotten their password. An admin
+// cannot SET a password (USER_EDITABLE_FIELDS excludes it, so it could never be
+// stored unhashed), and changePassword needs the current one — so without this
+// endpoint a locked-out user has no recovery path at all.
+//
+// The password is generated, not chosen by the admin: it is shown once in the
+// response and never readable again, exactly like the church bootstrap. The
+// user is expected to change it with PATCH /api/users/me/password afterwards.
+const resetUserPassword = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!isValidObjectId(id))
+      return res.status(400).json({ error: "Invalid ID" });
+
+    const user = await User.findOne(byIdInChurch(id, req));
+    if (!user) return res.status(404).json({ error: "User not found!" });
+
+    const plainPassword = generatePassword();
+    user.password = await bcrypt.hash(plainPassword, 10);
+    await user.save();
+
+    await recordAudit({
+      req,
+      action: "user.reset_password",
+      targetModel: "User",
+      targetId: user._id,
+      targetRef: user.email,
+      summary: `Reset the password for ${user.email}`,
+    });
+
+    res.status(200).json({
+      status: "Success",
+      message:
+        "Password reset. Give this to the user — it is shown once and cannot be read again.",
+      data: { email: user.email, password: plainPassword },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 
 const updateUser = async (req, res, next) => {
   try {
@@ -254,6 +302,7 @@ const removeUserAvatar = async (req, res, next) => {
 };
 
 export {
+  resetUserPassword,
   getAllUsers,
   getUser,
   createUser,

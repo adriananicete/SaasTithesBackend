@@ -1,6 +1,6 @@
 import express from 'express';
 import rateLimit from 'express-rate-limit';
-import { userLogin, userLogout, refreshAccessToken, forgotPassword, resetPassword } from '../../controllers/auth/authController.js';
+import { userLogin, userLogout, refreshAccessToken } from '../../controllers/auth/authController.js';
 import { getPublicChurches } from '../../controllers/auth/churchListController.js';
 
 const router = express.Router();
@@ -27,15 +27,6 @@ const refreshLimiter = rateLimit({
     message: { error: 'Too many refresh attempts. Try again later.' },
 });
 
-// Throttle password-reset requests (email-sending + token issuance)
-const resetLimiter = rateLimit({
-    windowMs: 60 * 60 * 1000,
-    max: 10,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: 'Too many password reset attempts. Try again later.' },
-});
-
 // Church dropdown — public by necessity, it is read before anyone can log in.
 router.get('/churches', getPublicChurches);
 
@@ -45,8 +36,8 @@ router.post('/refresh', refreshLimiter, refreshAccessToken);
 // Logout just clears cookies — must work even with an expired access token.
 router.post('/logout', userLogout);
 
-// Password reset (public)
-router.post('/forgot-password', resetLimiter, forgotPassword);
-router.post('/reset-password', resetLimiter, resetPassword);
+// There is no public password reset. A user who has forgotten their password
+// asks their church admin, who calls PATCH /api/admin/users/:id/reset-password
+// and hands over the generated one — the same way the account was created.
 
 export default router;
