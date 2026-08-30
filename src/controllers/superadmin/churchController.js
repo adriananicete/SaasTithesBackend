@@ -14,6 +14,7 @@ import { Notification } from "../../models/Notification.js";
 import { PushSubscription } from "../../models/PushSubscription.js";
 import cloudinary from "../../config/cloudinary.js";
 import { invalidateChurchStatus } from "../../services/churchStatus.js";
+import { invalidateChurchBranding } from "../../services/churchBranding.js";
 import { isValidObjectId } from "../../utils/validate.js";
 import {
   deriveAcronym,
@@ -293,6 +294,11 @@ const updateChurch = async (req, res, next) => {
       runValidators: true,
     });
 
+    // The name is printed on every export, and branding is cached — so a rename
+    // has to take effect on the next report, not whenever the TTL happens to
+    // lapse.
+    invalidateChurchBranding(id);
+
     res
       .status(200)
       .json({ status: "Success", message: "Church updated", data: church });
@@ -459,6 +465,7 @@ const purgeChurch = async (req, res, next) => {
 
     await Church.findByIdAndDelete(id);
     invalidateChurchStatus(id);
+    invalidateChurchBranding(id);
 
     res.status(200).json({
       status: "Success",

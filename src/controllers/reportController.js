@@ -14,10 +14,10 @@ import {
   buildExcelSheet,
   buildCombinedSummarySheet,
   buildMonthlyBreakdownSheet,
-  getLogoBuffer,
   renderPdfDoc,
   renderCombinedMonthlyPdf,
 } from "../utils/reportExport.js";
+import { getChurchBranding } from "../services/churchBranding.js";
 
 const XLSX_TYPE =
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -120,9 +120,11 @@ const exportTithesExcel = async (req, res, next) => {
     const { startDate, endDate } = req.query;
 
     const tithes = await fetchTithes(req, range);
+    const { name: churchName } = await getChurchBranding(req.user.church);
 
     const wb = new excel.Workbook();
     buildExcelSheet(wb.addWorksheet("Tithes"), {
+      churchName,
       reportName: "Tithes Report",
       startDate,
       endDate,
@@ -148,6 +150,7 @@ const exportTithesPDF = async (req, res, next) => {
     const { startDate, endDate } = req.query;
 
     const tithes = await fetchTithes(req, range);
+    const { name: churchName } = await getChurchBranding(req.user.church);
 
     const doc = newPdf();
     res.setHeader("Content-Type", "application/pdf");
@@ -155,6 +158,7 @@ const exportTithesPDF = async (req, res, next) => {
     doc.pipe(res);
 
     renderPdfDoc(doc, {
+      churchName,
       reportName: "Tithes Report",
       startDate,
       endDate,
@@ -180,9 +184,11 @@ const exportExpenseExcel = async (req, res, next) => {
     const { startDate, endDate } = req.query;
 
     const expenses = await fetchExpenses(req, range);
+    const { name: churchName } = await getChurchBranding(req.user.church);
 
     const wb = new excel.Workbook();
     buildExcelSheet(wb.addWorksheet("Expense"), {
+      churchName,
       reportName: "Expense Report",
       startDate,
       endDate,
@@ -207,6 +213,7 @@ const exportExpensePDF = async (req, res, next) => {
     const { startDate, endDate } = req.query;
 
     const expenses = await fetchExpenses(req, range);
+    const { name: churchName } = await getChurchBranding(req.user.church);
 
     const doc = newPdf();
     res.setHeader("Content-Type", "application/pdf");
@@ -214,6 +221,7 @@ const exportExpensePDF = async (req, res, next) => {
     doc.pipe(res);
 
     renderPdfDoc(doc, {
+      churchName,
       reportName: "Expense Report",
       startDate,
       endDate,
@@ -265,11 +273,12 @@ const exportCombinedExcel = async (req, res, next) => {
       fetchExpenses(req, range),
     ]);
     const summary = computeCombinedSummary(tithes, expenses);
+    const { name: churchName, logoBuffer } = await getChurchBranding(req.user.church);
 
     const wb = new excel.Workbook();
 
-    // Embed the JOSCM logo once at workbook level; the id is reusable per sheet.
-    const logoBuffer = getLogoBuffer();
+    // Embed this church's logo once at workbook level; the id is reusable per
+    // sheet. A church without a logo simply gets a header with no image.
     const logoImageId =
       logoBuffer != null
         ? wb.addImage({ buffer: logoBuffer, extension: "png" })
@@ -277,6 +286,7 @@ const exportCombinedExcel = async (req, res, next) => {
 
     // Primary sheet: month-by-month breakdown for transparency.
     buildMonthlyBreakdownSheet(wb.addWorksheet("Monthly Breakdown"), {
+      churchName,
       startDate,
       endDate,
       tithes,
@@ -285,11 +295,13 @@ const exportCombinedExcel = async (req, res, next) => {
       logoImageId,
     });
     buildCombinedSummarySheet(wb.addWorksheet("Summary"), {
+      churchName,
       startDate,
       endDate,
       summary,
     });
     buildExcelSheet(wb.addWorksheet("Tithes"), {
+      churchName,
       reportName: "Tithes Report",
       startDate,
       endDate,
@@ -299,6 +311,7 @@ const exportCombinedExcel = async (req, res, next) => {
       statusColorKey: "status",
     });
     buildExcelSheet(wb.addWorksheet("Expense"), {
+      churchName,
       reportName: "Expense Report",
       startDate,
       endDate,
@@ -330,6 +343,7 @@ const exportCombinedPDF = async (req, res, next) => {
       fetchExpenses(req, range),
     ]);
     const summary = computeCombinedSummary(tithes, expenses);
+    const { name: churchName, logoBuffer } = await getChurchBranding(req.user.church);
 
     const doc = newPdf();
     res.setHeader("Content-Type", "application/pdf");
@@ -340,12 +354,13 @@ const exportCombinedPDF = async (req, res, next) => {
     doc.pipe(res);
 
     renderCombinedMonthlyPdf(doc, {
+      churchName,
       startDate,
       endDate,
       tithes,
       expenses,
       summary,
-      logo: getLogoBuffer(),
+      logo: logoBuffer,
     });
 
     doc.end();

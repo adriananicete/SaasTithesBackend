@@ -1,15 +1,18 @@
 import excel from "exceljs";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
 
 // ---------------------------------------------------------------------------
 // Shared report-export builders. No DB access and no `res` handling here —
 // controllers fetch + populate the data, call these to build the document,
 // then stream it. Used by the tithes/expense exports and the combined report.
+//
+// Every builder takes `churchName` and, where it draws one, a logo. Both used
+// to be module-level constants — a hardcoded "Jesus Our Saviour Christian
+// Ministry" and a logo read off disk from src/assets — which is fine for one
+// church and prints the wrong organisation's name on every other church's
+// financial records the moment there are two. Nothing in here knows which
+// church it is drawing; the controller resolves that and passes it in.
 // ---------------------------------------------------------------------------
 
-export const CHURCH = "Jesus Our Saviour Christian Ministry";
 const CURRENCY_FMT = "#,##0.00";
 // Church palette: teal #326b7e (primary), white #ffffff, gold #ccac55 (accent).
 const TEAL = "FF326B7E";
@@ -48,21 +51,6 @@ const colLetter = (n) => {
     n = Math.floor((n - 1) / 26);
   }
   return s;
-};
-
-// ---- JOSCM logo (bundled asset, embedded into the workbook header) ----
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const LOGO_PATH = path.join(__dirname, "../assets/joscm-logo.png");
-let _logoBuffer; // undefined = not loaded; null = unavailable
-export const getLogoBuffer = () => {
-  if (_logoBuffer === undefined) {
-    try {
-      _logoBuffer = fs.readFileSync(LOGO_PATH);
-    } catch {
-      _logoBuffer = null; // missing asset shouldn't break the export
-    }
-  }
-  return _logoBuffer;
 };
 
 // ---- Month / week helpers (used by the monthly-breakdown sheet) ----
@@ -163,7 +151,7 @@ export const computeCombinedSummary = (tithes, expenses) => {
 // ---------------------------------------------------------------------------
 export function buildExcelSheet(
   ws,
-  { reportName, startDate, endDate, columns, rows, totals = [], statusColorKey },
+  { churchName, reportName, startDate, endDate, columns, rows, totals = [], statusColorKey },
 ) {
   const colCount = columns.length;
   const lastCol = colLetter(colCount);
@@ -176,7 +164,7 @@ export function buildExcelSheet(
     cell.font = font;
     cell.alignment = { horizontal: "center" };
   };
-  addTitle(CHURCH, { bold: true, size: 16 });
+  addTitle(churchName || "", { bold: true, size: 16 });
   addTitle(reportName, { bold: true, size: 13 });
   addTitle(rangeLine(startDate, endDate), {
     italic: true,
@@ -261,7 +249,7 @@ export function buildExcelSheet(
 }
 
 // Combined-report "Summary" sheet (key/value totals + by-category table).
-export function buildCombinedSummarySheet(ws, { startDate, endDate, summary }) {
+export function buildCombinedSummarySheet(ws, { churchName, startDate, endDate, summary }) {
   ws.columns = [{ key: "a", width: 28 }, { key: "b", width: 22 }];
 
   const addTitle = (text, font) => {
@@ -270,7 +258,7 @@ export function buildCombinedSummarySheet(ws, { startDate, endDate, summary }) {
     row.getCell(1).font = font;
     row.getCell(1).alignment = { horizontal: "center" };
   };
-  addTitle(CHURCH, { bold: true, size: 16 });
+  addTitle(churchName || "", { bold: true, size: 16 });
   addTitle("Financial Summary", { bold: true, size: 13 });
   addTitle(rangeLine(startDate, endDate), {
     italic: true,
@@ -327,7 +315,7 @@ export function buildCombinedSummarySheet(ws, { startDate, endDate, summary }) {
 // (date / particulars / category), monthly totals, and the month NET.
 export function buildMonthlyBreakdownSheet(
   ws,
-  { startDate, endDate, tithes, expenses, summary, logoImageId },
+  { churchName, startDate, endDate, tithes, expenses, summary, logoImageId },
 ) {
   ws.columns = [
     { key: "a", width: 20 },
@@ -427,7 +415,7 @@ export function buildMonthlyBreakdownSheet(
       editAs: "oneCell",
     });
   }
-  titleRow(CHURCH, { bold: true, size: 15, color: { argb: TEAL } }).height = 26;
+  titleRow(churchName || "", { bold: true, size: 15, color: { argb: TEAL } }).height = 26;
   titleRow("Financial Report", { bold: true, size: 13, color: { argb: GOLD } });
   titleRow(rangeLine(startDate, endDate), {
     italic: true,
@@ -561,9 +549,9 @@ const cellText = (doc, text, x, width, y, align = "center") => {
   }
 };
 
-const drawDocHeader = (doc, { reportName, startDate, endDate, left, contentW, y }) => {
+const drawDocHeader = (doc, { churchName, reportName, startDate, endDate, left, contentW, y }) => {
   doc.fillColor(PDF_TEAL).font("Helvetica-Bold").fontSize(17);
-  doc.text(CHURCH, left, y, { width: contentW, align: "center" });
+  doc.text(churchName || "", left, y, { width: contentW, align: "center" });
   y += 22;
   doc.fillColor(PDF_GOLD).fontSize(13).text(reportName, left, y, { width: contentW, align: "center" });
   y += 18;
@@ -674,12 +662,12 @@ const drawSection = (doc, { section, left, y, pageBottom }) => {
   return y;
 };
 
-export function renderPdfDoc(doc, { reportName, startDate, endDate, sections = [], summaryBlock }) {
+export function renderPdfDoc(doc, { churchName, reportName, startDate, endDate, sections = [], summaryBlock }) {
   const left = doc.page.margins.left;
   const contentW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
   const pageBottom = doc.page.height - doc.page.margins.bottom - FOOTER_H;
 
-  let y = drawDocHeader(doc, { reportName, startDate, endDate, left, contentW, y: doc.page.margins.top });
+  let y = drawDocHeader(doc, { churchName, reportName, startDate, endDate, left, contentW, y: doc.page.margins.top });
 
   if (summaryBlock) y = drawSummaryBlock(doc, { summaryBlock, left, y, pageBottom });
 
@@ -712,7 +700,7 @@ const drawPageFooters = (doc, left, contentW) => {
 // + expenses w/ particulars + month NET) -> a detailed-records appendix.
 export function renderCombinedMonthlyPdf(
   doc,
-  { startDate, endDate, tithes, expenses, summary, logo },
+  { churchName, startDate, endDate, tithes, expenses, summary, logo },
 ) {
   const left = doc.page.margins.left;
   const contentW = doc.page.width - left - doc.page.margins.right;
@@ -727,6 +715,7 @@ export function renderCombinedMonthlyPdf(
     }
   }
   y = drawDocHeader(doc, {
+    churchName,
     reportName: "Financial Report",
     startDate,
     endDate,
