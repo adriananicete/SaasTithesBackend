@@ -13,6 +13,7 @@ import { Comment } from "../../models/Comment.js";
 import { Notification } from "../../models/Notification.js";
 import { PushSubscription } from "../../models/PushSubscription.js";
 import cloudinary from "../../config/cloudinary.js";
+import { cloudinaryErrorText } from "../../utils/cloudinaryCleanup.js";
 import { invalidateChurchStatus } from "../../services/churchStatus.js";
 import { invalidateChurchBranding } from "../../services/churchBranding.js";
 import { isValidObjectId } from "../../utils/validate.js";
@@ -457,21 +458,13 @@ const purgeChurch = async (req, res, next) => {
       await cloudinary.api.delete_resources_by_prefix(prefix);
       await cloudinary.api.delete_folder(prefix);
     } catch (cloudinaryError) {
-      // The SDK nests its failure: the useful fields are on `.error`, and the
-      // top-level `.message` is undefined. Reading the wrong one meant every
-      // one of these logs said "undefined" — including the ones that mattered.
-      const detail = cloudinaryError?.error ?? cloudinaryError;
-      const httpCode = detail?.http_code;
-
       // A church that uploaded nothing has no folder, and deleting nothing is
       // not a failure. This 404 was being reported as an error on almost every
       // purge, which is how it came to fill the log.
+      const httpCode = cloudinaryError?.error?.http_code ?? cloudinaryError?.http_code;
       if (httpCode !== 404) {
-        // Never log the error OBJECT: the SDK attaches request_options.auth,
-        // which is the Cloudinary API key and secret. Only the message.
         console.error(
-          `Cloudinary cleanup failed for ${church.slug} ` +
-            `(${httpCode ?? "no status"}): ${detail?.message ?? "unknown error"}`,
+          `Cloudinary cleanup failed for ${church.slug} — ${cloudinaryErrorText(cloudinaryError)}`,
         );
       }
     }

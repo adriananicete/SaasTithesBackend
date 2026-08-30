@@ -23,6 +23,7 @@ import cloudinary from "../config/cloudinary.js";
 import { User } from "../models/User.js";
 import { Church } from "../models/Church.js";
 import { AuditLog } from "../models/AuditLog.js";
+import { cloudinaryErrorText, destroyCloudinaryAsset } from "../utils/cloudinaryCleanup.js";
 
 const BASE = process.env.CHECK_BASE_URL || "http://localhost:7001/api";
 
@@ -288,6 +289,51 @@ const main = async () => {
     is(folderError.message, undefined,
       "and the TOP-level .message is undefined — reading it is what printed 'undefined'");
   }
+
+  // ------------------------------------ the OTHER shape, and the helper -----
+  // uploader.* fails flat where api.* fails nested, so a reader that handles
+  // only one prints "undefined" for the other — the item 11 bug in reverse.
+  // Both shapes go through cloudinaryErrorText, so both are pinned here.
+  console.log("\ndeleting an asset: the second error shape, and the shared reader");
+
+  const gone = await cloudinary.uploader
+    .destroy(`not-a-real-asset-${Date.now()}`)
+    .then((r) => r?.result)
+    .catch(() => "threw");
+  is(gone, "not found",
+    "uploader.destroy RESOLVES with 'not found' for a missing id — it does not throw");
+
+  let flatError = null;
+  try {
+    await cloudinary.uploader.destroy("");
+    bad("uploader.destroy resolved for an empty public_id", "expected it to reject");
+  } catch (error) {
+    flatError = error;
+    ok("uploader.destroy rejects for an empty public_id");
+  }
+
+  if (flatError) {
+    typeof flatError.message === "string" && flatError.message.length > 0
+      ? ok("this one puts the reason on the TOP-level .message — the opposite of api.*")
+      : bad("the uploader error does not carry a top-level message");
+    is(flatError.error, undefined, "and has no nested .error at all");
+  }
+
+  // The reader has to survive both without ever printing "undefined".
+  const nestedText = cloudinaryErrorText(folderError);
+  const flatText = cloudinaryErrorText(flatError);
+  !nestedText.includes("undefined")
+    ? ok(`cloudinaryErrorText reads the nested shape — "${nestedText.slice(0, 48)}…"`)
+    : bad("cloudinaryErrorText printed undefined for the nested shape", nestedText);
+  !flatText.includes("undefined")
+    ? ok(`and the flat shape — "${flatText.slice(0, 48)}…"`)
+    : bad("cloudinaryErrorText printed undefined for the flat shape", flatText);
+
+  // A missing id is the outcome the caller wanted, so the helper reports success.
+  is(await destroyCloudinaryAsset(`not-a-real-asset-${Date.now()}`, "a check"), true,
+    "destroyCloudinaryAsset treats an already-absent asset as done");
+  is(await destroyCloudinaryAsset(null, "a check"), true,
+    "and does nothing at all when there is no public id");
 
   return su;
 };

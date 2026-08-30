@@ -1,6 +1,6 @@
 import bcrypt from "bcrypt";
 import { User } from "../../models/User.js";
-import cloudinary from "../../config/cloudinary.js";
+import { destroyCloudinaryAsset } from "../../utils/cloudinaryCleanup.js";
 import { recordAudit } from "../../utils/recordAudit.js";
 import { churchFilter, byIdInChurch } from "../../utils/tenantScope.js";
 import { CHURCH_ROLES } from "../../constants/roles.js";
@@ -203,9 +203,7 @@ const setUserAvatar = async (req, res, next) => {
     const user = await User.findOne(byIdInChurch(id, req));
     if (!user) return res.status(404).json({ error: "User not found!" });
 
-    if (user.avatarPublicId) {
-      try { await cloudinary.uploader.destroy(user.avatarPublicId); } catch (e) { /* non-fatal */ }
-    }
+    await destroyCloudinaryAsset(user.avatarPublicId, `replaced avatar for ${user.email}`);
 
     user.avatarUrl = req.file.path;
     user.avatarPublicId = req.file.filename;
@@ -233,9 +231,7 @@ const removeUserAvatar = async (req, res, next) => {
     const user = await User.findOne(byIdInChurch(id, req));
     if (!user) return res.status(404).json({ error: "User not found!" });
 
-    if (user.avatarPublicId) {
-      try { await cloudinary.uploader.destroy(user.avatarPublicId); } catch (e) { /* non-fatal */ }
-    }
+    await destroyCloudinaryAsset(user.avatarPublicId, `removed avatar for ${user.email}`);
 
     user.avatarUrl = null;
     user.avatarPublicId = null;

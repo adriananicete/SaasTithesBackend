@@ -1,6 +1,6 @@
 import { User } from "../models/User.js";
 import bcrypt from 'bcrypt';
-import cloudinary from "../config/cloudinary.js";
+import { destroyCloudinaryAsset } from "../utils/cloudinaryCleanup.js";
 import { recordAudit } from "../utils/recordAudit.js";
 
 // Return the currently authenticated user's profile (minus password). The
@@ -27,9 +27,7 @@ export const updateMyAvatar = async (req, res, next) => {
         if (!user) return res.status(404).json({ error: "User not found" });
 
         // Remove the previous image so Cloudinary doesn't accumulate orphans.
-        if (user.avatarPublicId) {
-            try { await cloudinary.uploader.destroy(user.avatarPublicId); } catch (e) { /* non-fatal */ }
-        }
+        await destroyCloudinaryAsset(user.avatarPublicId, `replaced own avatar for ${user.email}`);
 
         user.avatarUrl = req.file.path;
         user.avatarPublicId = req.file.filename;
@@ -57,9 +55,7 @@ export const removeMyAvatar = async (req, res, next) => {
         const user = await User.findById(req.user.id);
         if (!user) return res.status(404).json({ error: "User not found" });
 
-        if (user.avatarPublicId) {
-            try { await cloudinary.uploader.destroy(user.avatarPublicId); } catch (e) { /* non-fatal */ }
-        }
+        await destroyCloudinaryAsset(user.avatarPublicId, `removed own avatar for ${user.email}`);
 
         user.avatarUrl = null;
         user.avatarPublicId = null;
