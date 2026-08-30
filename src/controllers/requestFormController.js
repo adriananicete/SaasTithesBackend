@@ -4,6 +4,7 @@ import { sendNotification, sendNotificationToRoles } from "../utils/sendNotifica
 import { parseDate } from "../utils/validate.js";
 import { recordAudit } from "../utils/recordAudit.js";
 import { byIdInChurch } from "../utils/tenantScope.js";
+import { nextNumber } from "../utils/sequence.js";
 import {
   NOTIFY_RF_SUBMITTED,
   NOTIFY_RF_VALIDATED,
@@ -44,21 +45,6 @@ export const buildRfScope = ({ role, id, church }) => {
       $or: [{ status: "voucher_created" }, { disbursedBy: id }, { requestedBy: id }],
     };
   return { church, requestedBy: id };
-};
-
-// Numbering is per church — each starts at RF-0001 — so the "last" RF must be
-// the last in THIS church. Still racy (two concurrent creates can read the
-// same last row); the counter branch replaces this.
-const generateRFNo = async (church) => {
-  const lastRF = await RequestForm.findOne({ church }).sort({ createdAt: -1 });
-  let newNumber = 1;
-
-  if (lastRF && lastRF.rfNo) {
-    const lastNum = parseInt(lastRF.rfNo.split("-")[1], 10);
-    if (!isNaN(lastNum)) newNumber = lastNum + 1;
-  }
-
-  return `RF-${String(newNumber).padStart(4, "0")}`;
 };
 
 const getAllRequestForms = async (req, res, next) => {
@@ -120,7 +106,7 @@ const createRequestForm = async (req, res, next) => {
 
     const newRequestForm = new RequestForm({
       church: req.user.church,
-      rfNo: await generateRFNo(req.user.church),
+      rfNo: await nextNumber(req.user.church, "rfNo", "RF"),
       entryDate,
       category,
       estimatedAmount: amount,
