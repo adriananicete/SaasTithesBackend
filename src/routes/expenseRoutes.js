@@ -3,6 +3,7 @@ import { verifyToken } from '../middlewares/authMiddleware.js';
 import { blockInactiveChurch } from '../middlewares/tenantMiddleware.js';
 import { authorizeRoles } from '../middlewares/roleMiddleware.js';
 import { createManualExpense, getAllExpenses, getExpensesByCategory } from '../controllers/expenseController.js';
+import { EXPENSE_READ_ROLES, EXPENSE_WRITE_ROLES } from '../constants/roles.js';
 
 const router = express.Router();
 
@@ -11,8 +12,12 @@ const router = express.Router();
 // now redundant but harmless, and left in place as a second line of defence.
 router.use(verifyToken, blockInactiveChurch);
 
+// by-category is aggregated only and open to every role in the church; the
+// full ledger is admin/auditor only. That gate was missing entirely until now
+// — any member could pull every expense with requester and approver names
+// (businessRequirements §7, §14 item 1). The UI hid the page; the API did not.
 router.get('/by-category', verifyToken, getExpensesByCategory);
-router.get('/', verifyToken, getAllExpenses);
-router.post('/', verifyToken, authorizeRoles('admin'), createManualExpense);
+router.get('/', verifyToken, authorizeRoles(...EXPENSE_READ_ROLES), getAllExpenses);
+router.post('/', verifyToken, authorizeRoles(...EXPENSE_WRITE_ROLES), createManualExpense);
 
 export default router;

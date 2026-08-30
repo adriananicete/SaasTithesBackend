@@ -1,10 +1,13 @@
 import mongoose from "mongoose";
 import { Expense } from "../models/Expense.js";
+import { Category } from "../models/Category.js";
 import { recordAudit } from "../utils/recordAudit.js";
+import { byIdInChurch, churchFilter } from "../utils/tenantScope.js";
+import { EXPENSE_WRITE_ROLES } from "../constants/roles.js";
 
 const getAllExpenses = async (req, res, next) => {
   try {
-    const getAllData = await Expense.find()
+    const getAllData = await Expense.find(churchFilter(req))
       .populate({
         path: "linkedId",
         select: "pcfNo amount rfId",
@@ -31,16 +34,22 @@ const getAllExpenses = async (req, res, next) => {
 };
 
 // Category totals for the last 6 months. Aggregated only (no per-expense
-// detail) so it is safe to expose to every authenticated role for the
-// Dashboard's "Expenses by Category" chart — unlike getAllExpenses, which
-// returns full records (amounts, dates, recordedBy, linked voucher/RF).
+// detail) so it is safe to expose to every authenticated role in this church
+// for the Dashboard's "Expenses by Category" chart — unlike getAllExpenses,
+// which returns full records (amounts, dates, recordedBy, linked voucher/RF)
+// and is admin/auditor only.
 const getExpensesByCategory = async (req, res, next) => {
   try {
     const sixMonthsAgo = new Date();
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
 
+    // The aggregation pipeline gets no Mongoose casting, so the church has to
+    // be a real ObjectId here — a string silently matches nothing, which would
+    // read as "this church has no expenses" rather than as an error.
+    const church = new mongoose.Types.ObjectId(req.user.church);
+
     const data = await Expense.aggregate([
-      { $match: { date: { $gte: sixMonthsAgo } } },
+      { $match: { church, date: { $gte: sixMonthsAgo } } },
       { $group: { _id: "$category", amount: { $sum: "$amount" } } },
       {
         $lookup: {
@@ -74,7 +83,7 @@ const getExpensesByCategory = async (req, res, next) => {
 const createManualExpense = async (req, res, next) => {
   try {
 
-    if(!['admin'].includes(req.user.role)) return res.status(403).json({ error: 'Only admin can create manual expense' });
+    if(!EXPENSE_WRITE_ROLES.includes(req.user.role)) return res.status(403).json({ error: 'Only admin can create manual expense' });
     const { amount, category, date, remarks } = req.body;
 
     if(!mongoose.Types.ObjectId.isValid(category)) return res.status(400).json({error: `Invalid Category`});
@@ -86,7 +95,13 @@ const createManualExpense = async (req, res, next) => {
     // Remarks/particulars are the expense detail shown in financial reports.
     if(!remarks || !String(remarks).trim()) return res.status(400).json({ error: 'Remarks / particulars required' });
 
+    // The category name is printed in this church's reports, so it must be one
+    // of this church's own categories rather than any id that happens to exist.
+    const expenseCategory = await Category.findOne(byIdInChurch(category, req));
+    if(!expenseCategory) return res.status(404).json({ error: 'Category not found' });
+
     const newManualExpense = new Expense({
+        church: req.user.church,
         source: 'manual',
         amount: amount,
         category: category,
