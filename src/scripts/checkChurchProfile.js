@@ -253,6 +253,42 @@ const main = async () => {
   // A church's audit rows go with it.
   is(await AuditLog.countDocuments({ church: a.churchId }), 0, "and its audit rows are gone");
 
+  // ------------------------------------------- the shape purge relies on ----
+  // purgeChurch treats a 404 from delete_folder as success — a church that
+  // uploaded nothing has no folder, and deleting nothing is not a failure. That
+  // decision rests on a specific error shape from a third party, so it is
+  // pinned here: if Cloudinary ever changes it, this goes red instead of the
+  // purge quietly reporting failures again (or, worse, swallowing real ones).
+  console.log("\nthe Cloudinary error shape the purge depends on");
+  const missingPrefix = `churches/not-a-real-church-${Date.now()}`;
+
+  const emptyPrefix = await cloudinary.api
+    .delete_resources_by_prefix(missingPrefix)
+    .then(() => "resolved")
+    .catch((e) => `threw: ${e?.error?.message ?? e?.message}`);
+  is(emptyPrefix, "resolved",
+    "delete_resources_by_prefix succeeds on a prefix with nothing under it");
+
+  let folderError = null;
+  try {
+    await cloudinary.api.delete_folder(missingPrefix);
+    bad("delete_folder resolved for a folder that does not exist",
+      "the purge's 404 branch would never run — re-check the assumption");
+  } catch (error) {
+    folderError = error;
+    ok("delete_folder rejects for a folder that does not exist");
+  }
+
+  if (folderError) {
+    is(folderError.error?.http_code, 404, "the status is on error.http_code, and it is 404");
+    typeof folderError.error?.message === "string" && folderError.error.message.length > 0
+      ? ok("the human-readable reason is on error.message")
+      : bad("error.message is not where the purge reads it from");
+    // This is the bug that made every one of those log lines say "undefined".
+    is(folderError.message, undefined,
+      "and the TOP-level .message is undefined — reading it is what printed 'undefined'");
+  }
+
   return su;
 };
 

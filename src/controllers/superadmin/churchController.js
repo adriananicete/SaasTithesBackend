@@ -448,19 +448,32 @@ const purgeChurch = async (req, res, next) => {
       labels.map((key, i) => [key, results[i].deletedCount]),
     );
 
-    // Uploaded files are namespaced by acronym. Non-fatal: an orphaned folder
-    // is untidy, a half-purged database is not acceptable.
+    // Uploaded files are namespaced by slug — keyed on the slug and not the
+    // acronym, because the acronym may have been edited since upload while the
+    // slug never changes. Non-fatal: an orphaned folder is untidy, a
+    // half-purged database is not acceptable.
     try {
-      // Keyed on slug, not acronym: the acronym may have been edited since
-      // upload, the slug never changes.
       const prefix = `churches/${church.slug}`;
       await cloudinary.api.delete_resources_by_prefix(prefix);
       await cloudinary.api.delete_folder(prefix);
     } catch (cloudinaryError) {
-      console.error(
-        `Cloudinary cleanup failed for ${church.slug}:`,
-        cloudinaryError.message,
-      );
+      // The SDK nests its failure: the useful fields are on `.error`, and the
+      // top-level `.message` is undefined. Reading the wrong one meant every
+      // one of these logs said "undefined" — including the ones that mattered.
+      const detail = cloudinaryError?.error ?? cloudinaryError;
+      const httpCode = detail?.http_code;
+
+      // A church that uploaded nothing has no folder, and deleting nothing is
+      // not a failure. This 404 was being reported as an error on almost every
+      // purge, which is how it came to fill the log.
+      if (httpCode !== 404) {
+        // Never log the error OBJECT: the SDK attaches request_options.auth,
+        // which is the Cloudinary API key and secret. Only the message.
+        console.error(
+          `Cloudinary cleanup failed for ${church.slug} ` +
+            `(${httpCode ?? "no status"}): ${detail?.message ?? "unknown error"}`,
+        );
+      }
     }
 
     await Church.findByIdAndDelete(id);
